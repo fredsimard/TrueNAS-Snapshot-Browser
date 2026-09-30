@@ -1,0 +1,27 @@
+# TrueNAS custom app ("Install via YAML"). Phases 1-2: no sign-in yet, so the port is bound to
+# the NAS's localhost only; reach it with an SSH tunnel (see README).
+services:
+  snapback:
+    image: REGISTRY/snapback:TAG  # placeholder: no image is published yet
+    restart: unless-stopped
+    environment:
+      # Required. Comma-separated snapshot name prefixes users may see. The app refuses to
+      # start when this is empty.
+      SNAPSHOT_PREFIXES: "auto-"
+      TZ: America/Toronto  # example: set the server's timezone; snapshot names are read in it
+      SNAPBACK_CONFIG: /config/snapback.yaml
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - type: bind
+        source: /mnt/POOL/apps/snapback/snapback.yaml
+        target: /config/snapback.yaml
+        read_only: true
+      # One per distinct dataset mountpoint, same path inside and outside, read-only.
+      # rslave lets snapshots automounted after start appear inside (see spike/).
+      - type: bind
+        source: /mnt/tank/studio
+        target: /mnt/tank/studio
+        read_only: true
+        bind:
+          propagation: rslave
