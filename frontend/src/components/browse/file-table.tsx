@@ -249,7 +249,9 @@ export function FileTable({
                       <TableHead
                         key={h.id}
                         aria-sort={sorted ? (sorted === 'asc' ? 'ascending' : 'descending') : 'none'}
-                        className={cn('h-7 px-2 text-xs', WIDTHS[h.id], h.id === 'kind' && 'pl-4')}
+                        // Body cells have no padding of their own and pad their content; the checkbox column's
+                        // header must not add any either, or its checkbox sits to the right of the rows'.
+                        className={cn('h-7 px-2 text-xs', WIDTHS[h.id], h.id === 'check' && 'px-0', h.id === 'kind' && 'pl-4')}
                       >
                         {h.column.columnDef.enableSorting === false ? (
                           flexRender(h.column.columnDef.header, h.getContext())
