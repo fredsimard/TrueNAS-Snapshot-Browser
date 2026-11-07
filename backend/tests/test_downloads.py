@@ -1,3 +1,4 @@
+import asyncio
 import io
 import logging
 import os
@@ -7,6 +8,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi.testclient import TestClient
+from starlette.requests import ClientDisconnect
 
 from snapback import downloads, transfer
 from snapback.api import create_app
@@ -235,6 +237,40 @@ def test_browser_stopping_a_download():
     next(it)
     it.close()
     assert d.state == "cancelled"
+
+
+@pytest.mark.parametrize("spec_version", ["2.3", "2.4"])
+def test_a_client_that_leaves_before_the_stream_starts_releases_the_download(spec_version, caplog):
+    # The body generator never runs then, so its own cleanup can't be relied on.
+    d = transfer.Download("id", "alice", {}, "file", "n", 3)
+    d.state = "running"
+    fd = pipe_with(b"abc")
+    response = transfer.DownloadResponse(d, fd, 3, media_type="application/octet-stream")
+
+    async def receive():
+        return {"type": "http.disconnect"}
+
+    async def send(message):
+        if spec_version == "2.4":
+            raise OSError("client gone")
+
+    scope = {"type": "http", "asgi": {"spec_version": spec_version}}
+    with caplog.at_level(logging.INFO, "snapback.audit"):
+        try:
+            asyncio.run(response(scope, receive, send))
+        except ClientDisconnect:
+            pass
+    assert d.state == "cancelled" and fd_closed(fd)
+    assert [r.getMessage().startswith("download cancelled by 'alice'") for r in caplog.records] == [True]
+
+
+def test_releasing_twice_logs_and_closes_once(caplog):
+    d = transfer.Download("id", "alice", {}, "file", "n", 3)
+    fd = pipe_with(b"abc")
+    with caplog.at_level(logging.INFO, "snapback.audit"):
+        assert b"".join(transfer.body(d, fd, 3)) == b"abc"
+        transfer.release(d, fd)  # what the response does afterwards
+    assert d.state == "done" and len(caplog.records) == 1
 
 
 def test_a_file_that_shrank_fails():

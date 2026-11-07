@@ -16,6 +16,8 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from urllib.parse import quote
 
+from fastapi.responses import StreamingResponse
+
 from .downloads import ZIP_END_SIZE, zip_complete
 
 audit = logging.getLogger("snapback.audit")
@@ -42,6 +44,7 @@ class Download:
     state: str = "ready"  # ready → running → done | failed | cancelled
     sent: int = 0
     audit: dict = field(default_factory=dict)
+    closed: bool = False  # the descriptor is closed and the end is logged
 
     @property
     def finished(self) -> bool:
@@ -90,8 +93,35 @@ def body(d: Download, fd: int, length: int | None, read: Callable[[int, int], by
             d.state = "failed"
         raise
     finally:
-        os.close(fd)
-        log_end(d)
+        release(d, fd)
+
+
+def release(d: Download, fd: int) -> None:
+    """Close fd and log the end, once, however the response ended. A download still running here
+    was dropped before it finished."""
+    if d.closed:
+        return
+    d.closed = True
+    if d.state == "running":
+        d.state = "cancelled"
+    os.close(fd)
+    log_end(d)
+
+
+class DownloadResponse(StreamingResponse):
+    """A download's body. If the client goes away before the stream starts, body() never runs and its
+    cleanup with it, which would leave the download running and the descriptor open for good; so the
+    response releases the download itself once it's over."""
+
+    def __init__(self, d: Download, fd: int, length: int | None, **kwargs):
+        super().__init__(body(d, fd, length), **kwargs)
+        self._download, self._fd = d, fd
+
+    async def __call__(self, scope, receive, send) -> None:
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            release(self._download, self._fd)
 
 
 def log_end(d: Download, reason: str = "") -> None:
