@@ -233,7 +233,8 @@ def create_app(
         if plan["too_large"]:
             return {"too_large": True, "limit": plan["limit"]}
         if plan["kind"] == "file":
-            path = "/".join(p for p in (body_.path.strip("/"), body_.names[0]) if p)
+            # The plan skips names that are gone or unreadable, so the file is the one it found.
+            path = "/".join(p for p in (body_.path.strip("/"), plan["item"]) if p)
             req = {"op": "file", "root": root_id, "path": path, "at": body_.at}
         else:
             req = {"op": "zip", "root": root_id, "path": body_.path, "at": body_.at, "names": body_.names}

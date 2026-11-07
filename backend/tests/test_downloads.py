@@ -139,6 +139,16 @@ def test_file_download(client, caplog):
     assert "download done by 'alice': file" in line and SNAP in line and "/Projects/LOGOS/logo.psd" in line
 
 
+def test_a_single_file_among_names_that_are_gone_downloads_that_file(client):
+    # The first name is gone, so the plan is for notes.txt: that is what must be fetched.
+    r = prepare(client, ["gone.txt", "notes.txt"], at=client.snap).json()
+    assert r["kind"] == "file" and r["name"] == "notes (2023-11-14 17.13).txt"
+    assert "item" not in r
+    got = client.get(f"/api/downloads/{r['id']}")
+    assert got.content == b"old version"
+    assert client.get(f"/api/downloads/{r['id']}/progress").json()["state"] == "done"
+
+
 def test_folder_downloads_as_a_zip(client, tmp_path):
     r = prepare(client, ["LOGOS"], path="", at=client.snap).json()
     assert (r["kind"], r["name"], r["files"], r["folders"]) == ("zip", "LOGOS (2026-09-20 14.00).zip", 3, 2)
