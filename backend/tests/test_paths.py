@@ -2,8 +2,8 @@ import os
 
 import pytest
 
-from snapback.config import ConfigError, RootConfig
-from snapback.paths import Missing, PathRejected, observe_file, opened_dir, parse_rel, read_dir, resolve_root
+from snapshots_browser.config import ConfigError, RootConfig
+from snapshots_browser.paths import Missing, PathRejected, observe_file, opened_dir, parse_rel, read_dir, resolve_root
 
 
 @pytest.mark.parametrize(

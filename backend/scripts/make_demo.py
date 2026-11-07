@@ -4,7 +4,7 @@
     python scripts/make_demo.py ../dev/demo
 
 Creates <out>/mnt/STUDIO/STUDIO/{Production,Scratch} with hourly (48 h), daily (14 days) and
-weekly snapshots under .zfs/snapshot, plus <out>/snapback.env (the settings, in shell syntax).
+weekly snapshots under .zfs/snapshot, plus <out>/snapshots-browser.env (the settings, in shell syntax).
 Files are sparse and hard-linked across snapshots, so the tree takes almost no disk space.
 """
 
@@ -97,7 +97,7 @@ def state_at(its: list[dict], t: datetime) -> dict[str, tuple[dict, int]]:
 
 
 def is_demo_folder(path: Path) -> bool:
-    return (path / "snapback.env").is_file() and (path / "mnt").is_dir() and (path / "blobs").is_dir()
+    return (path / "snapshots-browser.env").is_file() and (path / "mnt").is_dir() and (path / "blobs").is_dir()
 
 
 def unlock(path: Path) -> None:
@@ -168,9 +168,9 @@ def main() -> int:
 
     shares = f"Production = {dataset / 'Production'}\nScratch = {dataset / 'Scratch'}"
     env = {"SERVER_NAME": "Studio Server", "SNAPSHOT_PREFIXES": "auto-", "SHARES": shares}
-    (out / "snapback.env").write_text("".join(f"{k}={shlex.quote(v)}\n" for k, v in env.items()))
+    (out / "snapshots-browser.env").write_text("".join(f"{k}={shlex.quote(v)}\n" for k, v in env.items()))
     print(f"{len(points)} snapshots in {dataset}")
-    print(f"set -a; . {out / 'snapback.env'}; set +a; python scripts/dev_server.py")
+    print(f"set -a; . {out / 'snapshots-browser.env'}; set +a; python scripts/dev_server.py")
     return 0
 
 

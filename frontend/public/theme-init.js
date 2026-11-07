@@ -3,7 +3,7 @@
 ;(function () {
   var theme = null
   try {
-    theme = localStorage.getItem('snapback-theme')
+    theme = localStorage.getItem('snapshots-browser-theme')
   } catch (e) {}
   var dark = theme === 'dark' || (theme !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches)
   document.documentElement.classList.toggle('dark', dark)

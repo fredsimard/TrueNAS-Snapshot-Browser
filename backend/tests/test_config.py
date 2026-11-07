@@ -1,6 +1,6 @@
 import pytest
 
-from snapback.config import (
+from snapshots_browser.config import (
     ConfigError,
     load_config,
     parse_allowed_users,

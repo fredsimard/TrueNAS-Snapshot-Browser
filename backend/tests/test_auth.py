@@ -4,9 +4,9 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-from snapback import auth
-from snapback.api import SESSION_COOKIE, create_app
-from snapback.auth import (
+from snapshots_browser import auth
+from snapshots_browser.api import SESSION_COOKIE, create_app
+from snapshots_browser.auth import (
     MAX_SESSIONS_PER_USER,
     AuthUnavailable,
     LoginThrottle,
@@ -14,9 +14,9 @@ from snapback.auth import (
     account_key,
     smb_sign_in,
 )
-from snapback.config import Config, RootConfig
-from snapback.ops import Ops
-from snapback.workers import InProcessBackend, WorkerUnavailable
+from snapshots_browser.config import Config, RootConfig
+from snapshots_browser.ops import Ops
+from snapshots_browser.workers import InProcessBackend, WorkerUnavailable
 from smbprotocol.exceptions import AccessDenied, BadNetworkName, SMBConnectionClosed, SMBException
 
 

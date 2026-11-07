@@ -1,6 +1,6 @@
 """Privilege-dropping workers (PLAN.md §8): the kernel, not this app, decides what a user may read.
 
-`python -m snapback` starts as root and splits into three kinds of process:
+`python -m snapshots_browser` starts as root and splits into three kinds of process:
 
     supervisor  root. Reads the host's accounts and forks workers. Never parses HTTP, never reads
                 a share.
@@ -396,7 +396,7 @@ class WorkerPool:
 class InProcessBackend:
     """Runs requests in this process, as whoever runs it, with no privilege drop.
 
-    For tests and scripts/dev_server.py only; `python -m snapback` never uses it. `accounts`, if
+    For tests and scripts/dev_server.py only; `python -m snapshots_browser` never uses it. `accounts`, if
     given, plays the host's account list.
     """
 

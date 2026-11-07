@@ -2,8 +2,8 @@ import os
 
 import pytest
 
-from snapback.config import ConfigError
-from snapback.identity import HostAccounts, Identity, parse_identity
+from snapshots_browser.config import ConfigError
+from snapshots_browser.identity import HostAccounts, Identity, parse_identity
 
 PASSWD = """\
 root:x:0:0:root:/root:/bin/bash

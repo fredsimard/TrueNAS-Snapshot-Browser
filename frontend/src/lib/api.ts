@@ -1,9 +1,9 @@
-// Client for the snapback API. Content is addressed by root id + relative path + opaque point id.
+// Client for the Snapshots Browser API. Content is addressed by root id + relative path + opaque point id.
 
 export const NOW = 'now'
 
 /** Fired when the server says the session is gone, or the user signs out. */
-export const SIGNED_OUT_EVENT = 'snapback:signed-out'
+export const SIGNED_OUT_EVENT = 'snapshots-browser:signed-out'
 
 export interface Info {
   server_label: string

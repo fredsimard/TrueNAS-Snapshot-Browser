@@ -6,7 +6,7 @@
       "runtimeExecutable": "bash",
       "runtimeArgs": [
         "-c",
-        "cd backend && set -a && . ../dev/demo/snapback.env && set +a && exec .venv/bin/python scripts/dev_server.py"
+        "cd backend && set -a && . ../dev/demo/snapshots-browser.env && set +a && exec .venv/bin/python scripts/dev_server.py"
       ],
       "port": 8080
     },

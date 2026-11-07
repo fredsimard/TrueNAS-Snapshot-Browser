@@ -11,14 +11,14 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette.requests import ClientDisconnect
 
-from snapback import downloads, transfer
-from snapback.api import create_app
-from snapback.config import Config, RootConfig
-from snapback.downloads import TooLarge, download_name, plan_zip, start_zip, zip_complete
-from snapback.ops import Ops
-from snapback.paths import Missing
-from snapback.transfer import DownloadAborted, content_disposition
-from snapback.workers import InProcessBackend
+from snapshots_browser import downloads, transfer
+from snapshots_browser.api import create_app
+from snapshots_browser.config import Config, RootConfig
+from snapshots_browser.downloads import TooLarge, download_name, plan_zip, start_zip, zip_complete
+from snapshots_browser.ops import Ops
+from snapshots_browser.paths import Missing
+from snapshots_browser.transfer import DownloadAborted, content_disposition
+from snapshots_browser.workers import InProcessBackend
 
 TZ = ZoneInfo("America/Toronto")
 SNAP = "auto-2026-09-20_14-00"
@@ -155,7 +155,7 @@ def test_file_download(client, caplog):
     body = r.json()
     assert body["kind"] == "file" and body["bytes"] == 11
     assert body["name"] == "logo (2023-11-14 17.13).psd"  # the version's modified time
-    with caplog.at_level(logging.INFO, "snapback.audit"):
+    with caplog.at_level(logging.INFO, "snapshots_browser.audit"):
         got = client.get(f"/api/downloads/{body['id']}")
     assert got.content == b"old version"
     assert got.headers["content-length"] == "11"
@@ -176,10 +176,10 @@ def test_a_single_file_among_names_that_are_gone_downloads_that_file(client):
 
 
 def test_the_audit_line_cannot_be_forged_through_names(client, caplog):
-    forged = "x\n2026-11-07 12:00:00,000 INFO snapback.audit: download done by 'bob': file salaries.xlsx"
+    forged = "x\n2026-11-07 12:00:00,000 INFO snapshots_browser.audit: download done by 'bob': file salaries.xlsx"
     r = prepare(client, ["logo.psd", "notes.txt", forged], at=client.snap).json()
     assert r["kind"] == "zip"
-    with caplog.at_level(logging.INFO, "snapback.audit"):
+    with caplog.at_level(logging.INFO, "snapshots_browser.audit"):
         client.get(f"/api/downloads/{r['id']}")
     (record,) = caplog.records
     line = record.getMessage()
@@ -192,7 +192,7 @@ def test_the_audit_line_escapes_names_on_the_share(client, ds, caplog):
     os.link(blob.path, ds.mountpoint / "Projects" / "LOGOS" / "we\nird\r.txt")
     r = prepare(client, ["we\nird\r.txt"]).json()
     assert r["kind"] == "file"
-    with caplog.at_level(logging.INFO, "snapback.audit"):
+    with caplog.at_level(logging.INFO, "snapshots_browser.audit"):
         assert client.get(f"/api/downloads/{r['id']}").content == b"x"
     line = caplog.records[-1].getMessage()
     assert "\n" not in line and "\r" not in line
@@ -303,7 +303,7 @@ def test_a_client_that_leaves_before_the_stream_starts_releases_the_download(spe
             raise OSError("client gone")
 
     scope = {"type": "http", "asgi": {"spec_version": spec_version}}
-    with caplog.at_level(logging.INFO, "snapback.audit"):
+    with caplog.at_level(logging.INFO, "snapshots_browser.audit"):
         try:
             asyncio.run(response(scope, receive, send))
         except ClientDisconnect:
@@ -315,7 +315,7 @@ def test_a_client_that_leaves_before_the_stream_starts_releases_the_download(spe
 def test_releasing_twice_logs_and_closes_once(caplog):
     d = transfer.Download("id", "alice", {}, "file", "n", 3)
     fd = pipe_with(b"abc")
-    with caplog.at_level(logging.INFO, "snapback.audit"):
+    with caplog.at_level(logging.INFO, "snapshots_browser.audit"):
         assert b"".join(transfer.body(d, fd, 3)) == b"abc"
         transfer.release(d, fd)  # what the response does afterwards
     assert d.state == "done" and len(caplog.records) == 1
@@ -336,7 +336,7 @@ def test_a_file_that_grew_is_cut_at_its_size():
 
 def test_an_unfinished_zip_fails(caplog):
     d = transfer.Download("id", "alice", {}, "zip", "n.zip", 10)
-    with caplog.at_level(logging.INFO, "snapback.audit"), pytest.raises(DownloadAborted):
+    with caplog.at_level(logging.INFO, "snapshots_browser.audit"), pytest.raises(DownloadAborted):
         list(transfer.body(d, pipe_with(b"PK\x03\x04 not finished"), None))
     assert d.state == "failed"
     assert "download failed by 'alice': zip" in caplog.records[-1].getMessage()

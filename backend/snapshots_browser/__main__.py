@@ -1,4 +1,4 @@
-"""Entry point: python -m snapback, started as root (see workers.py for the processes)."""
+"""Entry point: python -m snapshots_browser, started as root (see workers.py for the processes)."""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ HTTPS_PORT = 8443  # in the container; plain HTTP stays on the configured port
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     if os.geteuid() != 0:
-        print("snapback: must start as root, to read files as each signed-in user", file=sys.stderr)
+        print("snapshots-browser: must start as root, to read files as each signed-in user", file=sys.stderr)
         return 2
     try:
         config = load_config()
@@ -35,10 +35,10 @@ def main() -> int:
         accounts = HostAccounts()
         tls = HostTLS()
     except ConfigError as e:
-        print(f"snapback: configuration error: {e}", file=sys.stderr)
+        print(f"snapshots-browser: configuration error: {e}", file=sys.stderr)
         return 2
     static_dir = os.environ.get("SNAPBACK_STATIC_DIR") or DEFAULT_STATIC_DIR
-    logging.getLogger("snapback").info(
+    logging.getLogger("snapshots_browser").info(
         "serving HTTP on %d%s", config.port,
         f" and HTTPS on {HTTPS_PORT} with the mounted certificate" if tls.enabled else "; no certificate mounted",
     )
@@ -62,7 +62,7 @@ def main() -> int:
             asyncio.run(serve_all(listeners))
             code = 0
         except BaseException:
-            logging.getLogger("snapback").exception("web process failed")
+            logging.getLogger("snapshots_browser").exception("web process failed")
         finally:
             os._exit(code)
 

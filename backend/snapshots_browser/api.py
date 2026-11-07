@@ -49,7 +49,7 @@ from .workers import Backend, WorkerUnavailable
 
 log = logging.getLogger(__name__)
 
-SESSION_COOKIE = "snapback_session"
+SESSION_COOKIE = "snapshots_browser_session"
 MAX_LOGIN_BODY_BYTES = 16 << 10  # a username and a password
 MAX_BODY_BYTES = 8 << 20  # a download request naming up to MAX_NAMES items
 

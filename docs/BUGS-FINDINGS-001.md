@@ -37,7 +37,7 @@
 
 ### 1. Empty history for files in deleted folders (Medium, Reproduced)
 
-`observe_file` returns `("absent",)` when an ancestor folder is missing (`backend/snapback/paths.py:275`). If that folder was created after the oldest snapshot and deleted before Now, the keys at both ends of the range are equal. `file_history` (`backend/snapback/browse.py:185`) then treats the whole range as unchanged and skips it.
+`observe_file` returns `("absent",)` when an ancestor folder is missing (`backend/snapshots_browser/paths.py:275`). If that folder was created after the oldest snapshot and deleted before Now, the keys at both ends of the range are equal. `file_history` (`backend/snapshots_browser/browse.py:185`) then treats the whole range as unchanged and skips it.
 
 Repro: folder `Temp/` exists in snapshots 1–3 only, with `doc.txt` in two versions. `file_history(("Temp","doc.txt"))` returns 0 versions; expected 2. This is the "deleted" use case the app exists for: the user opens an old snapshot, sees the folder, opens a file, and the panel shows no copies.
 
@@ -45,7 +45,7 @@ Fix: when an ancestor is missing, key on the deepest existing ancestor's `(ino, 
 
 ### 2. Single-file download fetches the wrong name (Low, Reproduced)
 
-`backend/snapback/api.py:236` builds the `file` request from `body_.names[0]`. `plan_zip` skips names that are missing or unreadable, so the plan can describe a different name.
+`backend/snapshots_browser/api.py:236` builds the `file` request from `body_.names[0]`. `plan_zip` skips names that are missing or unreadable, so the plan can describe a different name.
 
 - `names=["gone.txt","real.txt"]`: the plan says `file real.txt`, the fetch targets `gone.txt`, `GET /api/downloads/{id}` returns 204 and progress shows `failed`.
 - `names=["LockedFolder","real.txt"]` (unreadable folder): same result.
@@ -54,13 +54,13 @@ Fix: have the plan return the one file's name and use it.
 
 ### 3. Download stuck in `running`, fd leaked (Low, Read)
 
-If the client disconnects before Starlette first iterates the `body()` generator, its `try/finally` is never entered. The fd stays open, the state stays `running`, the worker's zip thread blocks on a full pipe, and that download counts against `MAX_RUNNING_PER_SESSION` (3) until the session ends. The window is narrow. Related: the `ready → running` check and the running count in `backend/snapback/api.py:254-260` are not atomic, so two concurrent GETs of one id can both start.
+If the client disconnects before Starlette first iterates the `body()` generator, its `try/finally` is never entered. The fd stays open, the state stays `running`, the worker's zip thread blocks on a full pipe, and that download counts against `MAX_RUNNING_PER_SESSION` (3) until the session ends. The window is narrow. Related: the `ready → running` check and the running count in `backend/snapshots_browser/api.py:254-260` are not atomic, so two concurrent GETs of one id can both start.
 
 Fix: take a lock around the check-and-set; close the fd if the response is never started.
 
 ### 4. Download progress polling never ends (Low, Read)
 
-`follow()` in `frontend/src/hooks/use-downloads.tsx` polls `/progress` every second while the state is `ready` (the browser never started the download). `prune` runs only in `prepare_download` (`backend/snapback/api.py:240`), so the entry is never removed and the poll never stops. Each poll goes through `signed_in`, which resets the idle timer, so an open tab keeps the session alive indefinitely and shows "Downloading…" at 0%.
+`follow()` in `frontend/src/hooks/use-downloads.tsx` polls `/progress` every second while the state is `ready` (the browser never started the download). `prune` runs only in `prepare_download` (`backend/snapshots_browser/api.py:240`), so the entry is never removed and the poll never stops. Each poll goes through `signed_in`, which resets the idle timer, so an open tab keeps the session alive indefinitely and shows "Downloading…" at 0%.
 
 Fix: stop polling after a `ready` timeout; prune on `get_download` too.
 
@@ -72,7 +72,7 @@ Fix: stop polling after a `ready` timeout; prune on `get_download` too.
 
 ### 6. Login throttle bypassed by concurrent requests (Medium, Reproduced)
 
-`backend/snapback/api.py:175-190` checks `blocked()`, then calls `verify()` (an SMB round trip), then records `failed()`. Concurrent requests all pass the check before any failure is recorded. 30 concurrent bad logins for one username called `verify()` 30 times against a limit of 5; none received a 429. This defeats the stated goal of staying below AD lockout thresholds (the attempts can lock the account) and speeds up guessing.
+`backend/snapshots_browser/api.py:175-190` checks `blocked()`, then calls `verify()` (an SMB round trip), then records `failed()`. Concurrent requests all pass the check before any failure is recorded. 30 concurrent bad logins for one username called `verify()` 30 times against a limit of 5; none received a 429. This defeats the stated goal of staying below AD lockout thresholds (the attempts can lock the account) and speeds up guessing.
 
 Related, not reproduced:
 - `user_key = username.lower()` gives `DOMAIN\user` and `user@realm` their own buckets. Whether Samba accepts those forms for local accounts was not tested.
@@ -83,25 +83,25 @@ Fix: count the attempt before calling `verify()` and release it on success.
 
 ### 7. Audit log can be forged (Medium, Reproduced)
 
-Client-supplied `names` are written to the audit line unescaped (`backend/snapback/ops.py:128-136`, `backend/snapback/transfer.py:97-104`). `_names` only rejects `/`, a leading `.`, NUL and over-long names, so a newline passes. A zip request with `["real.txt","keep.txt","x\n<fake log line>"]` produced a second log line indistinguishable from a real `snapback.audit: download done by 'bob'` entry. Names that don't exist are also logged as downloaded, and real file names containing newlines do the same.
+Client-supplied `names` are written to the audit line unescaped (`backend/snapshots_browser/ops.py:128-136`, `backend/snapshots_browser/transfer.py:97-104`). `_names` only rejects `/`, a leading `.`, NUL and over-long names, so a newline passes. A zip request with `["real.txt","keep.txt","x\n<fake log line>"]` produced a second log line indistinguishable from a real `snapshots_browser.audit: download done by 'bob'` entry. Names that don't exist are also logged as downloaded, and real file names containing newlines do the same.
 
 Fix: log with `%r` (or JSON), and log only names that were actually in the plan.
 
 ### 8. No request-body size limit (Medium, Read)
 
-`/api/login` is unauthenticated and FastAPI buffers the whole body before the `Field(max_length=…)` checks in `backend/snapback/api.py:45-53` run. Neither the app nor the uvicorn config (`backend/snapback/__main__.py:56`) limits body size, and uvicorn has no header-read timeout. A large POST, or many slow connections, can exhaust memory or connections in the web process. `DownloadRequest.names` items have no per-item length limit either.
+`/api/login` is unauthenticated and FastAPI buffers the whole body before the `Field(max_length=…)` checks in `backend/snapshots_browser/api.py:45-53` run. Neither the app nor the uvicorn config (`backend/snapshots_browser/__main__.py:56`) limits body size, and uvicorn has no header-read timeout. A large POST, or many slow connections, can exhaust memory or connections in the web process. `DownloadRequest.names` items have no per-item length limit either.
 
 Fix: an ASGI middleware that rejects bodies over a few KB for `/api/login` (and a sane cap elsewhere), or a reverse proxy in front.
 
 ### 9. One user can block everyone's sign-in (Low, Read)
 
-There is no cap on sessions per user. Each sign-in forks a worker (`SupervisedBackend.start`), and the global limit is 64 (`backend/snapback/workers.py:44`). One account signing in 64 times makes every new sign-in return 503. `login` spawns the worker before `sessions.create` prunes expired sessions, so stale sessions at the limit also block sign-in until some request prunes them (`/api/info` does).
+There is no cap on sessions per user. Each sign-in forks a worker (`SupervisedBackend.start`), and the global limit is 64 (`backend/snapshots_browser/workers.py:44`). One account signing in 64 times makes every new sign-in return 503. `login` spawns the worker before `sessions.create` prunes expired sessions, so stale sessions at the limit also block sign-in until some request prunes them (`/api/info` does).
 
 Fix: cap sessions per user (replace the oldest), and prune before spawning.
 
 ### 10. FIFO hangs a worker forever (Low, Reproduced)
 
-`_FILE_FLAGS` (`backend/snapback/downloads.py:30`) has no `O_NONBLOCK`, so `open_file` blocks on a FIFO until a writer appears. Confirmed: the call was still blocked after 2 s. It needs a FIFO planted in the share (local access), or a file swapped for a FIFO between plan and fetch (see item 2, which also lets the client pick a name the plan never checked). The stuck worker also counts toward the 64 limit.
+`_FILE_FLAGS` (`backend/snapshots_browser/downloads.py:30`) has no `O_NONBLOCK`, so `open_file` blocks on a FIFO until a writer appears. Confirmed: the call was still blocked after 2 s. It needs a FIFO planted in the share (local access), or a file swapped for a FIFO between plan and fetch (see item 2, which also lets the client pick a name the plan never checked). The stuck worker also counts toward the 64 limit.
 
 Fix: open with `O_NONBLOCK`, `fstat`, then clear the flag for regular files.
 
@@ -114,7 +114,7 @@ Fix: open with `O_NONBLOCK`, `fstat`, then clear the flag for regular files.
 
 ### 12. Hardening and supply chain (Low, Read)
 
-- Container: runs as root with Docker's default capabilities. `deploy/compose.yaml` has no `no-new-privileges`, no `cap_drop`, no read-only rootfs and no memory or pids limits. Which capabilities the supervisor can do without was not tested (it needs to traverse share folders at startup).
+- Container: runs as root with Docker's default capabilities. `deploy/compose.yaml` (now `deploy/snapshots-browser.yaml`) has no `no-new-privileges`, no `cap_drop`, no read-only rootfs and no memory or pids limits. Which capabilities the supervisor can do without was not tested (it needs to traverse share folders at startup).
 - Build: Python dependencies use `>=` with no lock file (`backend/pyproject.toml`). Base images are tagged, not pinned by digest (`Dockerfile:4`, `Dockerfile:11`).
 - CI: actions are pinned by tag, not commit SHA. `packages: write` is granted for the whole workflow (`.github/workflows/image.yml:15`), including the test job, which only needs `contents: read`.
 - Frontend: `npm audit` reports 2 high advisories on `vite` 8.3.1 (fixed in a later release): `launch-editor` command execution and several dev-server file-read issues. Dev server only; the image ships built static files.

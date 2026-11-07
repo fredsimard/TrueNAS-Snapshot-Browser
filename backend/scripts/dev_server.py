@@ -3,7 +3,7 @@
 
 Fake sign-in lives here and not behind a flag in the app, so a deployed image can't enable it.
 
-    set -a; . ../dev/demo/snapback.env; set +a; python scripts/dev_server.py
+    set -a; . ../dev/demo/snapshots-browser.env; set +a; python scripts/dev_server.py
 """
 
 from __future__ import annotations
@@ -13,10 +13,10 @@ import os
 
 import uvicorn
 
-from snapback.api import create_app
-from snapback.config import load_config
-from snapback.ops import Ops
-from snapback.workers import InProcessBackend
+from snapshots_browser.api import create_app
+from snapshots_browser.config import load_config
+from snapshots_browser.ops import Ops
+from snapshots_browser.workers import InProcessBackend
 
 
 def main() -> None:

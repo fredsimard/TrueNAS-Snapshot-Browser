@@ -20,7 +20,7 @@ from fastapi.responses import StreamingResponse
 
 from .downloads import ZIP_END_SIZE, zip_complete
 
-audit = logging.getLogger("snapback.audit")
+audit = logging.getLogger("snapshots_browser.audit")
 
 CHUNK = 1 << 20
 MAX_RUNNING_PER_SESSION = 3

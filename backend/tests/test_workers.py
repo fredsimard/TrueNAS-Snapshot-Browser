@@ -11,9 +11,9 @@ import time
 
 import pytest
 
-from snapback import workers
-from snapback.identity import HostAccounts
-from snapback.workers import (
+from snapshots_browser import workers
+from snapshots_browser.identity import HostAccounts
+from snapshots_browser.workers import (
     EXIT_ACCOUNTS_CHANGED,
     MAX_WORKERS_PER_SESSION,
     ProtocolError,

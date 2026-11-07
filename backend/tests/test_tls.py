@@ -11,11 +11,11 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
 from fastapi.testclient import TestClient
 
-from snapback.api import SESSION_COOKIE, create_app
-from snapback.config import Config, ConfigError, RootConfig
-from snapback.ops import Ops
-from snapback.tls import HostTLS
-from snapback.workers import InProcessBackend
+from snapshots_browser.api import SESSION_COOKIE, create_app
+from snapshots_browser.config import Config, ConfigError, RootConfig
+from snapshots_browser.ops import Ops
+from snapshots_browser.tls import HostTLS
+from snapshots_browser.workers import InProcessBackend
 
 
 def make_pair(tmp_path, name="nas.example.test"):
