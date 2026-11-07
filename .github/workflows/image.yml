@@ -1,5 +1,5 @@
 # Tests, then the container image on ghcr.io/<owner>/snapshots-browser:
-#   push to master  → :edge and :sha-<commit>
+#   push to master  → :edge
 #   tag v1.2.3      → :1.2.3, :1.2 and :latest
 #   pull request    → built, not pushed
 name: Image
@@ -52,7 +52,6 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=edge,enable={{is_default_branch}}
-            type=sha
       - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6
         with:
           context: .
