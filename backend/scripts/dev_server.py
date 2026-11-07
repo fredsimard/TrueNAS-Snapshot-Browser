@@ -19,8 +19,12 @@ from snapback.config import load_config
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    config = load_config({**os.environ, "SMB_HOST": "unused.invalid"})
-    app = create_app(config, verify=lambda username, password: (username, password) == ("demo", "demo"))
+    config = load_config({"ALLOWED_USERS": "all", **os.environ, "SMB_HOST": "unused.invalid"})
+
+    def sign_in(username: str, password: str, shares: list[str]) -> set[str] | None:
+        return set(shares) if (username, password) == ("demo", "demo") else None
+
+    app = create_app(config, verify=sign_in)
     uvicorn.run(app, host=config.host, port=config.port)
 
 

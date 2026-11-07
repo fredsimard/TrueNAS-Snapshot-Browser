@@ -29,3 +29,19 @@ It tries a real login, a wrong password and an unknown user. Use the NAS's netwo
 container itself.
 
 **Result:** the real login opens a signed SMB 3.1.1 session; the other two are refused.
+
+## `smb_share.py`: which shares an account may use (Phase 4)
+
+```bash
+docker run --rm -it --mount type=bind,source=/path/to/smb_share.py,target=/smb_share.py,readonly python:3.12-slim sh -c "pip install -q --root-user-action=ignore smbprotocol && python3 /smb_share.py NAS_ADDRESS SHARE"
+```
+
+It signs in, connects to the share and opens its top folder for listing. Nothing is listed, read or written.
+
+**Result:**
+
+- An account with access, and every account in `builtin_users`, is allowed. TrueNAS adds new SMB users to
+  `builtin_users`, and the share and its folder allowed that group.
+- An account removed from `builtin_users` is denied, but only at its top folder. Samba accepts the share
+  connection, then refuses every request on it, including the disconnect. Connecting alone proves nothing.
+- An empty password is refused.

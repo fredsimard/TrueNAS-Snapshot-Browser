@@ -12,6 +12,7 @@ import { api, ApiError } from '@/lib/api'
 const MESSAGES: Record<string, [string, string]> = {
   bad_credentials: ['That didn’t work', 'Check your username and password, then try again.'],
   too_many_attempts: ['Too many tries', 'Wait a few minutes, then try again.'],
+  not_allowed: ['This account can’t use this app', 'If you need it, ask IT.'],
 }
 const UNAVAILABLE: [string, string] = [
   'Sign-in isn’t available right now',

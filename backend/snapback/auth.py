@@ -5,6 +5,12 @@ configured or stored here. Passwords live only for the duration of the SMB call.
 
 Signing is required. A session the server silently downgrades to guest can't be signed, so
 smbprotocol refuses it, and a verified signature proves the server knew the password.
+
+The same session then connects to each configured share and opens its top folder for listing, so
+Samba decides which shares the account may use: valid users, share ACLs, folder permissions and the
+rest of its rules apply unchanged. Connecting alone isn't enough: Samba accepts the connection for an
+account that can't read the share's folder, then refuses every request on it. Nothing is listed, read
+or written.
 """
 
 from __future__ import annotations
@@ -14,11 +20,22 @@ import secrets
 import threading
 import time
 import uuid
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass
 
 from smbprotocol.connection import Connection
-from smbprotocol.exceptions import SMBConnectionClosed, SMBException
+from smbprotocol.exceptions import BadNetworkName, SMBConnectionClosed, SMBException
+from smbprotocol.open import (
+    CreateDisposition,
+    CreateOptions,
+    DirectoryAccessMask,
+    FileAttributes,
+    ImpersonationLevel,
+    Open,
+    ShareAccess,
+)
 from smbprotocol.session import Session
+from smbprotocol.tree import TreeConnect
 
 log = logging.getLogger(__name__)
 
@@ -34,7 +51,12 @@ class AuthUnavailable(Exception):
     """The SMB server couldn't be reached, so the password was neither accepted nor refused."""
 
 
-def smb_verify(host: str, username: str, password: str) -> bool:
+# (username, password, share names) -> the shares the account may use, or None if the password
+# is refused. Raises AuthUnavailable.
+SignIn = Callable[[str, str, Sequence[str]], "Collection[str] | None"]
+
+
+def smb_sign_in(host: str, username: str, password: str, shares: Sequence[str]) -> frozenset[str] | None:
     conn = Connection(uuid.uuid4(), host, SMB_PORT, require_signing=True)
     try:
         conn.connect(timeout=SMB_TIMEOUT_SECONDS)
@@ -48,16 +70,43 @@ def smb_verify(host: str, username: str, password: str) -> bool:
             raise AuthUnavailable(type(e).__name__) from None
         except Exception as e:  # logon failures, expired passwords, guest sessions, NTLM errors
             log.info("SMB refused %r: %s", username, type(e).__name__)
-            return False
-        session.disconnect()
-        return True
+            return None
+        return frozenset(s for s in shares if _can_use(session, host, s, username))
     finally:
-        conn.disconnect()
+        # Drop the connection without logging off: Samba ends the session and its shares with it, and
+        # a share it refused also refuses the polite disconnect.
+        conn.disconnect(close=False)
+
+
+def _can_use(session: Session, host: str, share: str, username: str) -> bool:
+    try:
+        tree = TreeConnect(session, rf"\\{host}\{share}")
+        tree.connect()
+        top = Open(tree, "")
+        top.create(
+            ImpersonationLevel.Impersonation,
+            DirectoryAccessMask.FILE_LIST_DIRECTORY | DirectoryAccessMask.FILE_READ_ATTRIBUTES,
+            FileAttributes.FILE_ATTRIBUTE_DIRECTORY,
+            ShareAccess.FILE_SHARE_READ | ShareAccess.FILE_SHARE_WRITE | ShareAccess.FILE_SHARE_DELETE,
+            CreateDisposition.FILE_OPEN,
+            CreateOptions.FILE_DIRECTORY_FILE,
+        )
+        top.close()
+    except (OSError, SMBConnectionClosed) as e:
+        raise AuthUnavailable(type(e).__name__) from None
+    except BadNetworkName:
+        log.warning("SMB share %r doesn't exist on the server; check that root's smb_share", share)
+        return False
+    except SMBException as e:
+        log.info("SMB share %r refused for %r: %s", share, username, type(e).__name__)
+        return False
+    return True
 
 
 @dataclass
-class _Session:
+class UserSession:
     username: str
+    roots: frozenset[str]  # ids of the roots this user may browse
     expires: float
 
 
@@ -68,17 +117,17 @@ class SessionStore:
         self._idle = idle_seconds
         self._clock = clock
         self._lock = threading.Lock()
-        self._sessions: dict[str, _Session] = {}
+        self._sessions: dict[str, UserSession] = {}
 
-    def create(self, username: str) -> str:
+    def create(self, username: str, roots: Collection[str]) -> str:
         token = secrets.token_urlsafe(32)
         now = self._clock()
         with self._lock:
             self._sessions = {t: s for t, s in self._sessions.items() if s.expires > now}
-            self._sessions[token] = _Session(username, now + self._idle)
+            self._sessions[token] = UserSession(username, frozenset(roots), now + self._idle)
         return token
 
-    def get(self, token: str | None) -> str | None:
+    def get(self, token: str | None) -> UserSession | None:
         if not token:
             return None
         now = self._clock()
@@ -90,7 +139,7 @@ class SessionStore:
                 del self._sessions[token]
                 return None
             s.expires = now + self._idle
-            return s.username
+            return s
 
     def delete(self, token: str | None) -> None:
         if token:

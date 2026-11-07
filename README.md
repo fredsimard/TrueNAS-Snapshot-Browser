@@ -10,12 +10,13 @@ their share by folder and by time, and see what changed or was deleted. Plan and
 |---|---|
 | 0: automount spike | Passed on TrueNAS: [spike/README.md](spike/README.md) |
 | 1–2: read-only browser, config, multi-root | Done, checked on real snapshots |
-| 3: sign-in | Built; the SMB check passed on TrueNAS, the app's sign-in hasn't run there yet |
-| 4–7: per-user permissions, downloads, AD, packaging | Not started |
+| 3: sign-in | Done, checked on TrueNAS |
+| 4: per-user permissions | In progress: users see only the shares Samba lets them connect to, and `ALLOWED_USERS` limits who can sign in. Folder permissions inside a share aren't applied yet. |
+| 5–7: downloads, AD, packaging | Not started |
 
-**Not ready for staff yet.** Sign-in proves who someone is, but until Phase 4 every signed-in user sees
-everything under the mounted datasets, because the app runs as root in the container. The app also serves plain
-HTTP, so passwords cross the LAN unencrypted unless a TLS reverse proxy sits in front of it.
+**Not ready for staff yet.** Inside a share, every signed-in user sees everything under the mounted
+datasets, because the app runs as root in the container; Phase 4's privilege-dropping workers fix that.
+The app also serves plain HTTP, so passwords cross the LAN unencrypted.
 
 ## Layout
 
@@ -35,12 +36,15 @@ Environment (set at app creation):
 |---|---|
 | `SNAPSHOT_PREFIXES` | **Required.** Comma-separated snapshot name prefixes users may see, e.g. `auto-,daily-`. The app refuses to start without it. |
 | `SMB_HOST` | **Required.** The NAS's network address. Sign-in checks passwords by opening an SMB session to it. `127.0.0.1` is refused: in the container that's the container itself. |
+| `ALLOWED_USERS` | **Required.** `all`, or comma-separated usernames allowed to use the app (case doesn't matter). Others get "This account can't use this app" after a correct password. |
 | `TZ` | Timezone the timestamps in snapshot names are written in. Defaults to the container's local time. |
 | `SNAPBACK_CONFIG` | Config file path. Default `/config/snapback.yaml`. |
 
 Config file: see [deploy/snapback.example.yaml](deploy/snapback.example.yaml). Each root is a share
 folder; the dataset mountpoint is detected by walking up to the nearest `.zfs/snapshot`. Mount each
-distinct dataset mountpoint read-only at the same path inside the container.
+distinct dataset mountpoint read-only at the same path inside the container. At sign-in, the app
+connects to each root's SMB share with the user's own credentials and shows only the roots Samba
+lets that account use.
 
 Point in time for each snapshot comes from the timestamp in its name (TrueNAS `auto-%Y-%m-%d_%H-%M`,
 zfs-auto-snapshot and sanoid formats). Names without one fall back to the directory's mtime.

@@ -26,7 +26,7 @@ def setup(ds, tmp_path):
     (static / "assets").mkdir(parents=True)
     (static / "index.html").write_text("<!doctype html><title>app</title>")
     (static / "assets" / "app.js").write_text("console.log(1)")
-    client = TestClient(create_app(config, str(static), verify=lambda u, p: True))
+    client = TestClient(create_app(config, str(static), verify=lambda u, p, shares: set(shares)))
     assert client.post("/api/login", json={"username": "alice", "password": "pw"}).status_code == 200
     return client, str(tmp_path)
 

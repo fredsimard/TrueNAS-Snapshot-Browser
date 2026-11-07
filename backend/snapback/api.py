@@ -2,14 +2,14 @@
 
 Clients address content as root id + relative path + opaque point id. No absolute path,
 snapshot name or OS error text is ever sent to the client. Everything except sign-in and the
-server's name requires a session.
+server's name requires a session, and each session sees only the roots whose SMB share the
+account could connect to at sign-in.
 """
 
 from __future__ import annotations
 
 import logging
 import os
-from collections.abc import Callable
 from functools import partial
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
@@ -25,7 +25,9 @@ from .auth import (
     AuthUnavailable,
     LoginThrottle,
     SessionStore,
-    smb_verify,
+    SignIn,
+    UserSession,
+    smb_sign_in,
 )
 from .browse import FolderResult, History, Row, Timeline, file_history, list_folder
 from .config import Config
@@ -45,13 +47,14 @@ class LoginRequest(BaseModel):
 def create_app(
     config: Config,
     static_dir: str | None = None,
-    verify: Callable[[str, str], bool] | None = None,
+    verify: SignIn | None = None,
 ) -> FastAPI:
-    verify = verify or partial(smb_verify, config.smb_host)
+    verify = verify or partial(smb_sign_in, config.smb_host)
     sessions = SessionStore()
     user_throttle = LoginThrottle(MAX_FAILURES_PER_USER)
     address_throttle = LoginThrottle(MAX_FAILURES_PER_ADDRESS)
     roots: dict[str, Root] = {rc.id: resolve_root(rc) for rc in config.roots}
+    share_names = list(dict.fromkeys(rc.share_name for rc in config.roots))
     index = SnapshotIndex(
         prefixes=config.snapshot_prefixes,
         max_listed=config.max_snapshots_listed,
@@ -91,15 +94,16 @@ def create_app(
             response.headers["Cache-Control"] = "no-store"
         return response
 
-    def signed_in(request: Request) -> str:
-        user = sessions.get(request.cookies.get(SESSION_COOKIE))
-        if user is None:
+    def signed_in(request: Request) -> UserSession:
+        session = sessions.get(request.cookies.get(SESSION_COOKIE))
+        if session is None:
             raise HTTPException(401, "not_signed_in")
-        return user
+        return session
 
-    def get_root(root_id: str) -> Root:
+    def get_root(root_id: str, session: UserSession = Depends(signed_in)) -> Root:
+        # A root the user may not browse is indistinguishable from one that doesn't exist.
         root = roots.get(root_id)
-        if root is None:
+        if root is None or root_id not in session.roots:
             raise HTTPException(404, "unknown_root")
         return root
 
@@ -120,11 +124,11 @@ def create_app(
 
     @app.get("/api/info")
     def info(request: Request) -> dict:
-        user = sessions.get(request.cookies.get(SESSION_COOKIE))
+        session = sessions.get(request.cookies.get(SESSION_COOKIE))
         return {
             "server_label": config.server_label,
-            "user": user,
-            "roots": [{"id": r.id, "label": r.label} for r in roots.values()] if user else [],
+            "user": session.username if session else None,
+            "roots": [{"id": r.id, "label": r.label} for r in roots.values() if session and r.id in session.roots],
         }
 
     @app.post("/api/login")
@@ -137,19 +141,27 @@ def create_app(
         if user_throttle.blocked(user_key) or address_throttle.blocked(address):
             log.warning("sign-in blocked for %r from %s: too many failures", username, address)
             raise HTTPException(429, "too_many_attempts")
+        # The password is checked whether or not the account is allowed, so the answer never reveals
+        # which usernames are on the list. Shares are only tried for allowed accounts.
+        allowed = config.allowed_users is None or username.casefold() in config.allowed_users
         try:
-            ok = verify(username, body.password)
+            shares = verify(username, body.password, share_names if allowed else [])
         except AuthUnavailable as e:
             log.error("sign-in unavailable, SMB server unreachable: %s", e)
             raise HTTPException(503, "auth_unavailable") from None
-        if not ok:
+        if shares is None:
             user_throttle.failed(user_key)
             address_throttle.failed(address)
             log.warning("sign-in failed for %r from %s", username, address)
             raise HTTPException(401, "bad_credentials")
         user_throttle.clear(user_key)
-        log.info("signed in: %r from %s", username, address)
-        response.set_cookie(SESSION_COOKIE, sessions.create(username), httponly=True, samesite="strict", path="/")
+        if not allowed:
+            log.warning("sign-in refused for %r from %s: not in ALLOWED_USERS", username, address)
+            raise HTTPException(403, "not_allowed")
+        visible = frozenset(rc.id for rc in config.roots if rc.share_name in shares)
+        log.info("signed in: %r from %s, roots: %s", username, address, ", ".join(sorted(visible)) or "none")
+        token = sessions.create(username, visible)
+        response.set_cookie(SESSION_COOKIE, token, httponly=True, samesite="strict", path="/")
         return {"user": username}
 
     @app.post("/api/logout")
@@ -158,21 +170,19 @@ def create_app(
         response.delete_cookie(SESSION_COOKIE, httponly=True, samesite="strict", path="/")
         return {}
 
-    @app.get("/api/roots/{root_id}/points", dependencies=[Depends(signed_in)])
-    def points(root_id: str) -> dict:
-        tl = timeline(get_root(root_id))
+    @app.get("/api/roots/{root_id}/points")
+    def points(root: Root = Depends(get_root)) -> dict:
+        tl = timeline(root)
         return {"points": [{"id": s.id, "time": s.time.isoformat()} for s in tl.snapshots]}
 
-    @app.get("/api/roots/{root_id}/folder", dependencies=[Depends(signed_in)])
-    def folder(root_id: str, path: str = "", at: str = "now") -> dict:
-        root = get_root(root_id)
+    @app.get("/api/roots/{root_id}/folder")
+    def folder(root: Root = Depends(get_root), path: str = "", at: str = "now") -> dict:
         parts = get_parts(path)
         tl = timeline(root)
         return folder_json(tl, list_folder(tl, parts, point_index(tl, at)))
 
-    @app.get("/api/roots/{root_id}/history", dependencies=[Depends(signed_in)])
-    def history(root_id: str, path: str) -> dict:
-        root = get_root(root_id)
+    @app.get("/api/roots/{root_id}/history")
+    def history(path: str, root: Root = Depends(get_root)) -> dict:
         parts = get_parts(path)
         if not parts:
             raise HTTPException(400, "bad_path")

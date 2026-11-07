@@ -3,24 +3,33 @@ from fastapi.testclient import TestClient
 
 from snapback import auth
 from snapback.api import SESSION_COOKIE, create_app
-from snapback.auth import AuthUnavailable, LoginThrottle, SessionStore, smb_verify
+from snapback.auth import AuthUnavailable, LoginThrottle, SessionStore, smb_sign_in
 from snapback.config import Config, RootConfig
-from smbprotocol.exceptions import SMBConnectionClosed, SMBException
+from smbprotocol.exceptions import AccessDenied, BadNetworkName, SMBConnectionClosed, SMBException
+
+
+def alice(u, p, shares):
+    """Fake SMB: alice/secret is accepted and may use every share."""
+    return set(shares) if (u, p) == ("alice", "secret") else None
 
 
 @pytest.fixture
 def make_client(ds):
-    (ds.mountpoint / "S").mkdir()
-    config = Config(
+    for name in ("S", "T"):
+        (ds.mountpoint / name).mkdir()
+    base = Config(
         server_label="NAS01",
         host="127.0.0.1",
         port=0,
-        roots=(RootConfig("s", "S", str(ds.mountpoint / "S")),),
+        roots=(
+            RootConfig("s", "S", str(ds.mountpoint / "S")),
+            RootConfig("t", "Team", str(ds.mountpoint / "T"), smb_share="TEAM"),
+        ),
         snapshot_prefixes=("auto-",),
     )
 
-    def make(verify=lambda u, p: (u, p) == ("alice", "secret")):
-        return TestClient(create_app(config, verify=verify))
+    def make(verify=alice, **overrides):
+        return TestClient(create_app(Config(**{**base.__dict__, **overrides}), verify=verify))
 
     return make
 
@@ -49,8 +58,57 @@ def test_sign_in(make_client):
     assert (r.status_code, r.json()) == (200, {"user": "alice"})
     cookie = r.headers["set-cookie"].lower()
     assert "httponly" in cookie and "samesite=strict" in cookie and "path=/" in cookie
-    assert client.get("/api/info").json()["user"] == "alice"
+    info = client.get("/api/info").json()
+    assert info["user"] == "alice"
+    assert info["roots"] == [{"id": "s", "label": "S"}, {"id": "t", "label": "Team"}]
     assert client.get("/api/roots/s/folder").status_code == 200
+
+
+def test_sign_in_asks_for_each_share_by_its_smb_name(make_client):
+    calls = []
+    login(make_client(lambda u, p, shares: calls.append(list(shares)) or set()))
+    assert calls == [["S", "TEAM"]]
+
+
+def test_only_shares_samba_allows_are_visible(make_client):
+    client = make_client(lambda u, p, shares: {"TEAM"})
+    assert login(client).status_code == 200
+    assert client.get("/api/info").json()["roots"] == [{"id": "t", "label": "Team"}]
+    assert client.get("/api/roots/t/folder").status_code == 200
+    for url in ["/api/roots/s/points", "/api/roots/s/folder", "/api/roots/s/history?path=a"]:
+        r = client.get(url)
+        assert (r.status_code, r.json()) == (404, {"error": "unknown_root"})  # same as a root that doesn't exist
+
+
+def test_no_shares_still_signs_in(make_client):
+    client = make_client(lambda u, p, shares: set())
+    assert login(client).status_code == 200
+    assert client.get("/api/info").json()["roots"] == []
+
+
+@pytest.mark.parametrize("username", ["alice", "ALICE", " Alice "])
+def test_allowed_users(make_client, username):
+    client = make_client(lambda u, p, shares: set(shares), allowed_users=frozenset({"alice", "bob"}))
+    assert login(client, username, "pw").status_code == 200
+
+
+def test_user_not_in_allowed_users(make_client):
+    calls = []
+
+    def verify(u, p, shares):
+        calls.append(list(shares))
+        return set(shares)
+
+    client = make_client(verify, allowed_users=frozenset({"bob"}))
+    r = login(client)
+    assert (r.status_code, r.json()) == (403, {"error": "not_allowed"})
+    assert SESSION_COOKIE not in client.cookies
+    assert calls == [[]]  # the password was checked, no share was tried
+
+
+def test_allowed_users_does_not_reveal_who_is_listed(make_client):
+    client = make_client(lambda u, p, shares: None, allowed_users=frozenset({"bob"}))
+    assert login(client, "alice", "wrong").json() == login(client, "bob", "wrong").json() == {"error": "bad_credentials"}
 
 
 def test_forged_cookie_is_refused(make_client):
@@ -79,7 +137,7 @@ def test_bad_credentials(make_client, username, password):
 
 def test_empty_values_never_reach_the_smb_server(make_client):
     calls = []
-    client = make_client(lambda u, p: calls.append(u) or True)
+    client = make_client(lambda u, p, shares: calls.append(u) or set())
     login(client, "", "x")
     login(client, "alice", "")
     assert calls == []
@@ -97,9 +155,9 @@ def test_malformed_request_does_not_echo_the_password(make_client):
 def test_repeated_failures_stop_reaching_the_smb_server(make_client):
     calls = []
 
-    def verify(u, p):
+    def verify(u, p, shares):
         calls.append(u)
-        return False
+        return None
 
     client = make_client(verify)
     assert [login(client, "Alice", "x").status_code for _ in range(5)] == [401] * 5
@@ -118,7 +176,7 @@ def test_success_clears_failures(make_client):
 
 
 def test_smb_server_unreachable(make_client):
-    def verify(u, p):
+    def verify(u, p, shares):
         raise AuthUnavailable("ValueError")
 
     r = login(make_client(verify))
@@ -128,11 +186,11 @@ def test_smb_server_unreachable(make_client):
 def test_session_expires_when_idle_and_slides_with_use():
     t = [0.0]
     store = SessionStore(idle_seconds=100, clock=lambda: t[0])
-    token = store.create("alice")
+    token = store.create("alice", {"s"})
     t[0] = 90
-    assert store.get(token) == "alice"
+    assert (store.get(token).username, store.get(token).roots) == ("alice", frozenset({"s"}))
     t[0] = 180  # 90 s after the last use
-    assert store.get(token) == "alice"
+    assert store.get(token).username == "alice"
     t[0] = 281
     assert store.get(token) is None
     assert store.get(None) is None
@@ -161,7 +219,8 @@ class FakeConnection:
         if self.connect_error:
             raise self.connect_error
 
-    def disconnect(self):
+    def disconnect(self, close=True):
+        assert close is False  # a refused share also refuses the polite disconnect
         self.closed = True
 
 
@@ -179,35 +238,87 @@ class FakeSession:
         pass
 
 
+class FakeTree:
+    errors: dict[str, Exception] = {}  # raised by connect
+    connected: list[str] = []
+
+    def __init__(self, session, path):
+        self.path = path
+        self.share = path.rsplit("\\", 1)[1]
+
+    def connect(self):
+        if self.share in self.errors:
+            raise self.errors[self.share]
+        FakeTree.connected.append(self.path)
+
+
+class FakeOpen:
+    errors: dict[str, Exception] = {}  # raised by create, as Samba does for a folder the account can't read
+    opened: list[tuple] = []
+
+    def __init__(self, tree, name):
+        self.tree, self.name = tree, name
+
+    def create(self, impersonation, access, attributes, share_access, disposition, options):
+        if self.tree.share in self.errors:
+            raise self.errors[self.tree.share]
+        FakeOpen.opened.append((self.tree.share, self.name, access, disposition))
+
+    def close(self):
+        pass
+
+
 @pytest.fixture
 def fake_smb(monkeypatch):
     monkeypatch.setattr(auth, "Connection", FakeConnection)
     monkeypatch.setattr(auth, "Session", FakeSession)
+    monkeypatch.setattr(auth, "TreeConnect", FakeTree)
+    monkeypatch.setattr(auth, "Open", FakeOpen)
+    monkeypatch.setattr(FakeOpen, "errors", {})
+    monkeypatch.setattr(FakeOpen, "opened", [])
     monkeypatch.setattr(FakeConnection, "connect_error", None)
     monkeypatch.setattr(FakeSession, "connect_error", None)
+    monkeypatch.setattr(FakeTree, "errors", {})
+    monkeypatch.setattr(FakeTree, "connected", [])
     return monkeypatch
 
 
-def test_smb_verify_accepts_and_requires_signing(fake_smb):
-    assert smb_verify("nas", "alice", "pw") is True
+def test_smb_sign_in_accepts_and_requires_signing(fake_smb):
+    assert smb_sign_in("nas", "alice", "pw", ["A", "B"]) == {"A", "B"}
+    assert FakeTree.connected == [r"\\nas\A", r"\\nas\B"]
+    # Only opens each share's top folder, for listing, and never creates anything.
+    list_access = auth.DirectoryAccessMask.FILE_LIST_DIRECTORY | auth.DirectoryAccessMask.FILE_READ_ATTRIBUTES
+    assert FakeOpen.opened == [(s, "", list_access, auth.CreateDisposition.FILE_OPEN) for s in "AB"]
     assert FakeConnection.created.require_signing is True
     assert FakeConnection.created.closed
 
 
-def test_smb_verify_refuses_guest_and_logon_failures(fake_smb):
+def test_smb_sign_in_keeps_only_shares_samba_allows(fake_smb):
+    fake_smb.setattr(FakeTree, "errors", {"A": AccessDenied(), "C": BadNetworkName()})
+    fake_smb.setattr(FakeOpen, "errors", {"D": AccessDenied()})  # connects, but can't read the folder
+    assert smb_sign_in("nas", "alice", "pw", ["A", "B", "C", "D"]) == {"B"}
+    assert FakeConnection.created.closed
+
+
+def test_smb_sign_in_refuses_guest_and_logon_failures(fake_smb):
     fake_smb.setattr(FakeSession, "connect_error", SMBException("authenticated as a guest"))
-    assert smb_verify("nas", "alice", "pw") is False
+    assert smb_sign_in("nas", "alice", "pw", ["A"]) is None
+    assert FakeTree.connected == []
     assert FakeConnection.created.closed
 
 
 @pytest.mark.parametrize("error", [ValueError("Failed to connect"), OSError("no route")])
-def test_smb_verify_unreachable(fake_smb, error):
+def test_smb_sign_in_unreachable(fake_smb, error):
     fake_smb.setattr(FakeConnection, "connect_error", error)
     with pytest.raises(AuthUnavailable):
-        smb_verify("nas", "alice", "pw")
+        smb_sign_in("nas", "alice", "pw", ["A"])
 
 
-def test_smb_connection_lost_is_not_a_wrong_password(fake_smb):
-    fake_smb.setattr(FakeSession, "connect_error", SMBConnectionClosed("closed"))
+@pytest.mark.parametrize("stage", ["session", "tree"])
+def test_smb_connection_lost_is_not_a_wrong_password(fake_smb, stage):
+    if stage == "session":
+        fake_smb.setattr(FakeSession, "connect_error", SMBConnectionClosed("closed"))
+    else:
+        fake_smb.setattr(FakeTree, "errors", {"A": SMBConnectionClosed("closed")})
     with pytest.raises(AuthUnavailable):
-        smb_verify("nas", "alice", "pw")
+        smb_sign_in("nas", "alice", "pw", ["A"])

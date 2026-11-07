@@ -11,6 +11,8 @@ services:
       # Required. The NAS's network address, used to check passwords. Not 127.0.0.1: inside the
       # container that's the container itself.
       SMB_HOST: "192.0.2.10"
+      # Required. "all", or comma-separated usernames allowed to use the app.
+      ALLOWED_USERS: "all"
       TZ: America/Toronto  # example: set the server's timezone; snapshot names are read in it
       SNAPBACK_CONFIG: /config/snapback.yaml
     ports:

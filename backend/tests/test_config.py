@@ -3,6 +3,7 @@ import pytest
 from snapback.config import (
     ConfigError,
     load_config,
+    parse_allowed_users,
     parse_config,
     parse_prefixes,
     parse_smb_host,
@@ -36,10 +37,17 @@ def test_load_config(tmp_path):
     p = tmp_path / "c.yaml"
     p.write_text("server_label: X\nroots:\n  - id: a\n    share_root: /mnt/a/b\n")
     cfg = load_config(
-        {"SNAPBACK_CONFIG": str(p), "SNAPSHOT_PREFIXES": "auto-", "SMB_HOST": "192.0.2.10", "TZ": "America/Toronto"}
+        {
+            "SNAPBACK_CONFIG": str(p),
+            "SNAPSHOT_PREFIXES": "auto-",
+            "SMB_HOST": "192.0.2.10",
+            "ALLOWED_USERS": "Alice, bob",
+            "TZ": "America/Toronto",
+        }
     )
     assert cfg.snapshot_prefixes == ("auto-",)
     assert cfg.smb_host == "192.0.2.10"
+    assert cfg.allowed_users == {"alice", "bob"}
     assert cfg.timezone.key == "America/Toronto"
     assert (cfg.host, cfg.port) == ("0.0.0.0", 8080)
 
@@ -47,8 +55,38 @@ def test_load_config(tmp_path):
 def test_missing_file(tmp_path):
     with pytest.raises(ConfigError, match="not found"):
         load_config(
-            {"SNAPBACK_CONFIG": str(tmp_path / "nope.yaml"), "SNAPSHOT_PREFIXES": "auto-", "SMB_HOST": "192.0.2.10"}
+            {
+                "SNAPBACK_CONFIG": str(tmp_path / "nope.yaml"),
+                "SNAPSHOT_PREFIXES": "auto-",
+                "SMB_HOST": "192.0.2.10",
+                "ALLOWED_USERS": "all",
+            }
         )
+
+
+def test_load_config_requires_allowed_users(tmp_path):
+    with pytest.raises(ConfigError, match="ALLOWED_USERS is required"):
+        load_config({"SNAPBACK_CONFIG": str(tmp_path / "missing.yaml"), "SNAPSHOT_PREFIXES": "auto-", "SMB_HOST": "192.0.2.10"})
+
+
+@pytest.mark.parametrize("raw", [None, "", "  ", ", ,"])
+def test_allowed_users_required(raw):
+    with pytest.raises(ConfigError, match="ALLOWED_USERS is required"):
+        parse_allowed_users(raw)
+
+
+@pytest.mark.parametrize("raw", ["all", " ALL ", "All,"])
+def test_allowed_users_all(raw):
+    assert parse_allowed_users(raw) is None
+
+
+def test_allowed_users_list_is_casefolded_and_trimmed():
+    assert parse_allowed_users(" Alice ,bob,,ALICE") == {"alice", "bob"}
+
+
+def test_allowed_users_all_must_be_alone():
+    with pytest.raises(ConfigError, match="on its own"):
+        parse_allowed_users("all,bob")
 
 
 @pytest.mark.parametrize("raw", [None, "", "  "])
@@ -63,10 +101,20 @@ def test_smb_host_cannot_be_the_container(raw):
         parse_smb_host(raw)
 
 
-def test_label_defaults_to_share_folder_name():
+def test_label_and_share_default_to_share_folder_name():
     cfg = parse_config(MINIMAL, ("auto-",))
     assert cfg.roots[0].label == "Projects"
+    assert cfg.roots[0].share_name == "Projects"
     assert cfg.roots[0].dataset_mountpoint is None
+
+
+def test_label_defaults_to_smb_share():
+    root = {"id": "v", "share_root": "/mnt/tank/v", "smb_share": "VIDEO_ARCHIVE"}
+    cfg = parse_config({**MINIMAL, "roots": [root]}, ("auto-",))
+    assert (cfg.roots[0].label, cfg.roots[0].share_name) == ("VIDEO_ARCHIVE", "VIDEO_ARCHIVE")
+    root["label"] = "Video Archive"
+    cfg = parse_config({**MINIMAL, "roots": [root]}, ("auto-",))
+    assert (cfg.roots[0].label, cfg.roots[0].share_name) == ("Video Archive", "VIDEO_ARCHIVE")
 
 
 def test_unknown_keys_rejected():
@@ -84,6 +132,9 @@ def test_unknown_keys_rejected():
         {"id": "a", "share_root": "/"},
         {"id": "a", "share_root": "/x/y", "dataset_mountpoint": "x"},
         {"id": "a", "share_root": "/x/y", "label": ""},
+        {"id": "a", "share_root": "/x/y", "smb_share": ""},
+        {"id": "a", "share_root": "/x/y", "smb_share": "a\\b"},
+        {"id": "a", "share_root": "/x/y", "smb_share": "a/b"},
     ],
 )
 def test_invalid_roots(root):
