@@ -1,4 +1,4 @@
-# snapback
+# snapshots-browser
 
 Self-service browsing of ZFS snapshots of an SMB share, as a TrueNAS SCALE app. Users move through
 their share by folder and by time, and see what changed or was deleted. Plan and design:
@@ -88,7 +88,7 @@ backend/.venv/bin/python backend/scripts/make_demo.py dev/demo
 ```
 
 ```bash
-cd backend && set -a && . ../dev/demo/snapback.env && set +a && .venv/bin/python scripts/dev_server.py
+cd backend && set -a && . ../dev/demo/snapshots-browser.env && set +a && .venv/bin/python scripts/dev_server.py
 ```
 
 ```bash
