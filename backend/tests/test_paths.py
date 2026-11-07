@@ -52,7 +52,7 @@ def test_no_snapshot_dir(tmp_path):
 
 
 def test_share_root_missing(tmp_path):
-    with pytest.raises(ConfigError, match="not a directory"):
+    with pytest.raises(ConfigError, match="isn.t in the container. Mount the dataset"):
         resolve_root(RootConfig("p", "x", str(tmp_path / "nope")))
 
 

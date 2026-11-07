@@ -104,22 +104,25 @@ def detect_dataset_mountpoint(path: str) -> str | None:
 
 
 def resolve_root(cfg: RootConfig) -> Root:
-    where = f"roots[{cfg.id}]"
+    where = f"SHARES: {cfg.label}"
     share = os.path.realpath(cfg.share_root)
     if not os.path.isdir(share):
-        raise ConfigError(f"{where}.share_root: not a directory in the container: {cfg.share_root}")
+        raise ConfigError(
+            f"{where}: {cfg.share_root} isn't in the container. Mount the dataset that holds it, read-only, "
+            "at the same path."
+        )
     if cfg.dataset_mountpoint:
         dataset = os.path.realpath(cfg.dataset_mountpoint)
         if os.path.commonpath([share, dataset]) != dataset:
-            raise ConfigError(f"{where}.dataset_mountpoint: must be share_root or one of its parents")
+            raise ConfigError(f"{where}: dataset_mountpoint must be the share's folder or one of its parents")
         if not has_snapshot_dir(dataset):
-            raise ConfigError(f"{where}.dataset_mountpoint: {dataset}/.zfs/snapshot is not accessible")
+            raise ConfigError(f"{where}: {dataset}/.zfs/snapshot is not accessible")
     else:
         found = detect_dataset_mountpoint(share)
         if found is None:
             raise ConfigError(
-                f"{where}: no .zfs/snapshot at {share} or any parent. Mount the dataset mountpoint, "
-                "not only the share folder, into the container."
+                f"{where}: no .zfs/snapshot at {share} or any parent. Mount the dataset that holds the share "
+                "(its mountpoint, not only the share's folder) into the container."
             )
         dataset = found
     rel = os.path.relpath(share, dataset)

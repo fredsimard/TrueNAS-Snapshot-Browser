@@ -1,33 +1,40 @@
-# TrueNAS custom app: paste into "Install via YAML" in the Apps screen. The Custom App wizard can't
-# set mount propagation, and without rslave snapshots appear empty.
+# snapback on TrueNAS SCALE: Apps → Discover Apps → ⋮ → Install via YAML. Give the app a name, paste
+# this, then change the values marked ← for your server. The Custom App wizard can't be used: it
+# can't set the mount propagation the snapshots need (rslave, below).
 services:
   snapback:
-    # Loaded on the NAS with `docker load`; never pulled from a registry.
-    image: snapback:dev
-    pull_policy: never
-    # The app exits when TrueNAS replaces the host's account files (any account or group change),
-    # so it has to come back up to read the new ones.
-    restart: unless-stopped
+    image: ghcr.io/fredsimard/snapback:1.0.0
+    restart: unless-stopped  # the app restarts itself when accounts or the certificate change
     environment:
-      # Required. Comma-separated snapshot name prefixes users may see.
-      SNAPSHOT_PREFIXES: "auto-"
-      # Required. The NAS's network address, used to check passwords. Not 127.0.0.1: inside the
-      # container that's the container itself.
-      SMB_HOST: "192.0.2.10"
-      # Required. "all", or comma-separated usernames allowed to use the app.
-      ALLOWED_USERS: "all"
-      TZ: America/Toronto  # example: set the server's timezone; snapshot names are read in it
-      MAX_DOWNLOAD_GB: "20"  # largest zip one download may hold
-      SNAPBACK_CONFIG: /config/snapback.yaml
+      SERVER_NAME: "Studio Server"  # ← the name users know this server by, shown at the top
+      SMB_HOST: "192.0.2.10"  # ← this NAS's network address, used to check passwords (not 127.0.0.1)
+      # ← The shares users may browse, one per line: the SMB share name, "=", the share's path.
+      SHARES: |
+        Projects = /mnt/tank/studio/Projects
+        Video Archive = /mnt/tank/video
+      SNAPSHOT_PREFIXES: "auto-"  # ← the start of the snapshot names users may see, comma-separated
+      ALLOWED_USERS: "all"  # ← "all", or the usernames allowed in, comma-separated: "alice,bob"
+      TZ: "America/Toronto"  # ← this server's time zone: snapshot names are written in it
+      MAX_DOWNLOAD_GB: "20"  # largest zip one download may hold; single files have no limit
     ports:
       - "18080:8080"  # HTTP
-      - "18443:8443"  # HTTPS, served only when the certificate below is mounted
+      - "18443:8443"  # HTTPS, served only when the certificate at the bottom is mounted
     volumes:
+      # ← One entry per dataset that holds a share in SHARES: its mountpoint, at the same path
+      # inside, read-only, with rslave. Without rslave, snapshots look empty.
       - type: bind
-        source: /mnt/tank/apps/snapback/snapback.yaml
-        target: /config/snapback.yaml
+        source: /mnt/tank/studio
+        target: /mnt/tank/studio
         read_only: true
-      # The host's accounts: the app reads files as the signed-in user's uid and groups.
+        bind:
+          propagation: rslave
+      - type: bind
+        source: /mnt/tank/video
+        target: /mnt/tank/video
+        read_only: true
+        bind:
+          propagation: rslave
+      # The NAS's accounts: files are read as the signed-in user, so the NAS's permissions apply.
       - type: bind
         source: /etc/passwd
         target: /host/etc/passwd
@@ -36,21 +43,14 @@ services:
         source: /etc/group
         target: /host/etc/group
         read_only: true
-      # Optional: the NAS's own certificate, for HTTPS on 8443 next to HTTP on 8080. TrueNAS writes
-      # each certificate it holds to /etc/certificates/<name>.crt and .key; use the one for the name
-      # users type. Without these two mounts the app serves plain HTTP only.
+      # Optional, for HTTPS: the NAS's own certificate. TrueNAS keeps each certificate it holds in
+      # /etc/certificates/<name>.crt and .key (Credentials → Certificates shows the names). Use the
+      # one for the name users type. Remove these two entries for HTTP only.
       - type: bind
-        source: /etc/certificates/nas-example-com.crt
+        source: /etc/certificates/nas-example-com.crt  # ←
         target: /host/tls/tls.crt
         read_only: true
       - type: bind
-        source: /etc/certificates/nas-example-com.key
+        source: /etc/certificates/nas-example-com.key  # ←
         target: /host/tls/tls.key
         read_only: true
-      # One per distinct dataset mountpoint, same path inside and outside, read-only.
-      - type: bind
-        source: /mnt/tank/studio
-        target: /mnt/tank/studio
-        read_only: true
-        bind:
-          propagation: rslave

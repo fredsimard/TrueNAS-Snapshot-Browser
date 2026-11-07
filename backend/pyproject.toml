@@ -10,7 +10,6 @@ requires-python = ">=3.10"
 dependencies = [
     "fastapi>=0.115",
     "uvicorn>=0.54",  # ssl_context_factory: TLS with a key loaded before dropping root
-    "pyyaml>=6.0",
     "smbprotocol>=1.15",
     "tzdata>=2024.1",
 ]

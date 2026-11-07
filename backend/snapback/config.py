@@ -1,8 +1,20 @@
-"""Configuration: one YAML file per server, plus environment variables set at app creation.
+"""Configuration, all from environment variables set when the app is created (TrueNAS: "Install via
+YAML", the environment block).
 
-SNAPSHOT_PREFIXES, SMB_HOST and ALLOWED_USERS are mandatory. Without the first, users could see an
-unfiltered snapshot list; without the second, nobody can sign in; without the third, a forgotten
-field would open the app to every account. The app refuses to start without them.
+Required: SERVER_NAME, SHARES, SNAPSHOT_PREFIXES, SMB_HOST and ALLOWED_USERS. Without the prefixes,
+users could see an unfiltered snapshot list; without SMB_HOST, nobody can sign in; without
+ALLOWED_USERS, a forgotten field would open the app to every account. The app refuses to start
+without them, and says which one is missing.
+
+SHARES lists the shares users may browse, one per line (or comma-separated), each as the SMB share
+name users connect to, "=", and the share's folder on the NAS:
+
+    SHARES: |
+      Projects = /mnt/tank/studio/Projects
+      Video Archive = /mnt/tank/video
+
+The share name is what users see, and sign-in shows a share only if Samba lets the account use it.
+Each share's dataset must be mounted into the container at the same path.
 """
 
 from __future__ import annotations
@@ -10,22 +22,15 @@ from __future__ import annotations
 import os
 import posixpath
 import re
+import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-import yaml
-
-DEFAULT_CONFIG_PATH = "/config/snapback.yaml"
-DEFAULT_LISTEN = "0.0.0.0:8080"
+DEFAULT_HOST = "0.0.0.0"
+DEFAULT_PORT = 8080
 DEFAULT_MAX_SNAPSHOTS_LISTED = 500
 DEFAULT_MAX_DOWNLOAD_GB = 20
-
-ROOT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
-TOP_KEYS = {"server_label", "listen", "roots", "limits"}
-ROOT_KEYS = {"id", "label", "share_root", "smb_share", "dataset_mountpoint"}
-LIMIT_KEYS = {"max_snapshots_listed"}
-
 
 # Characters Windows and Samba don't accept in a share name, plus control characters.
 BAD_SHARE_CHARS = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
@@ -53,10 +58,10 @@ class RootConfig:
 @dataclass(frozen=True)
 class Config:
     server_label: str
-    host: str
-    port: int
     roots: tuple[RootConfig, ...]
     snapshot_prefixes: tuple[str, ...]
+    host: str = DEFAULT_HOST
+    port: int = DEFAULT_PORT
     # Where sign-in sends credentials. 127.0.0.1 would be the container itself.
     smb_host: str = ""
     # Casefolded usernames allowed to use the app. None: every account Samba accepts.
@@ -70,20 +75,16 @@ class Config:
 
 
 def load_config(environ: Mapping[str, str] = os.environ) -> Config:
-    prefixes = parse_prefixes(environ.get("SNAPSHOT_PREFIXES"))
-    smb_host = parse_smb_host(environ.get("SMB_HOST"))
-    allowed_users = parse_allowed_users(environ.get("ALLOWED_USERS"))
-    timezone = parse_timezone(environ.get("TZ"))
-    max_download_bytes = parse_max_download(environ.get("MAX_DOWNLOAD_GB"))
-    path = environ.get("SNAPBACK_CONFIG") or DEFAULT_CONFIG_PATH
-    try:
-        with open(path, encoding="utf-8") as f:
-            raw = yaml.safe_load(f)
-    except FileNotFoundError:
-        raise ConfigError(f"config file not found: {path}") from None
-    except yaml.YAMLError as e:
-        raise ConfigError(f"{path}: invalid YAML: {e}") from None
-    return parse_config(raw, prefixes, timezone, smb_host, allowed_users, max_download_bytes)
+    return Config(
+        snapshot_prefixes=parse_prefixes(environ.get("SNAPSHOT_PREFIXES")),
+        smb_host=parse_smb_host(environ.get("SMB_HOST")),
+        allowed_users=parse_allowed_users(environ.get("ALLOWED_USERS")),
+        roots=parse_shares(environ.get("SHARES")),
+        server_label=parse_server_name(environ.get("SERVER_NAME")),
+        timezone=parse_timezone(environ.get("TZ")),
+        max_download_bytes=parse_max_download(environ.get("MAX_DOWNLOAD_GB")),
+        max_snapshots_listed=parse_max_listed(environ.get("MAX_SNAPSHOTS_LISTED")),
+    )
 
 
 def parse_prefixes(raw: str | None) -> tuple[str, ...]:
@@ -145,98 +146,64 @@ def parse_timezone(raw: str | None) -> ZoneInfo | None:
         raise ConfigError(f"TZ: unknown timezone {raw!r}") from None
 
 
-def parse_config(
-    raw: object,
-    prefixes: tuple[str, ...],
-    timezone: ZoneInfo | None = None,
-    smb_host: str = "",
-    allowed_users: frozenset[str] | None = None,
-    max_download_bytes: int = DEFAULT_MAX_DOWNLOAD_GB * 10**9,
-) -> Config:
-    top = _mapping(raw, "config", TOP_KEYS)
-
-    server_label = top.get("server_label")
-    if not isinstance(server_label, str) or not server_label.strip():
-        raise ConfigError("server_label: required, a non-empty string")
-
-    host, port = _parse_listen(top.get("listen", DEFAULT_LISTEN))
-
-    raw_roots = top.get("roots")
-    if not isinstance(raw_roots, list) or not raw_roots:
-        raise ConfigError("roots: required, a non-empty list")
-    roots = tuple(_parse_root(r, i) for i, r in enumerate(raw_roots))
-    seen: set[str] = set()
-    for r in roots:
-        if r.id in seen:
-            raise ConfigError(f"roots: duplicate id {r.id!r}")
-        seen.add(r.id)
-
-    limits = _mapping(top.get("limits") or {}, "limits", LIMIT_KEYS)
-    max_listed = limits.get("max_snapshots_listed", DEFAULT_MAX_SNAPSHOTS_LISTED)
-    if type(max_listed) is not int or max_listed < 1:
-        raise ConfigError("limits.max_snapshots_listed: must be a positive integer")
-
-    return Config(
-        server_label=server_label.strip(),
-        host=host,
-        port=port,
-        roots=roots,
-        snapshot_prefixes=prefixes,
-        smb_host=smb_host,
-        allowed_users=allowed_users,
-        timezone=timezone,
-        max_snapshots_listed=max_listed,
-        max_download_bytes=max_download_bytes,
-    )
+def parse_server_name(raw: str | None) -> str:
+    name = (raw or "").strip()
+    if not name:
+        raise ConfigError("SERVER_NAME is required: the name users know this server by, shown at the top of the app.")
+    return name
 
 
-def _mapping(raw: object, where: str, allowed: set[str]) -> dict:
-    if not isinstance(raw, dict):
-        raise ConfigError(f"{where}: expected a mapping")
-    unknown = sorted(str(k) for k in raw if k not in allowed)
-    if unknown:
-        raise ConfigError(f"{where}: unknown key(s): {', '.join(unknown)}")
-    return raw
+def parse_shares(raw: str | None) -> tuple[RootConfig, ...]:
+    text = (raw or "").strip()
+    if not text:
+        raise ConfigError(
+            "SHARES is required: one share per line, as NAME = /mnt/pool/dataset/folder, where NAME is the "
+            "SMB share name users connect to."
+        )
+    entries = text.splitlines() if "\n" in text else text.split(",")
+    roots: list[RootConfig] = []
+    names: set[str] = set()
+    ids: set[str] = set()
+    for entry in (e.strip() for e in entries):
+        if not entry or entry.startswith("#"):
+            continue
+        name, sep, path = entry.partition("=")
+        name, path = name.strip(), path.strip()
+        if not sep or not name:
+            raise ConfigError(f"SHARES: {entry!r} should be NAME = /path/to/the/share's/folder")
+        if BAD_SHARE_CHARS.search(name):
+            raise ConfigError(f"SHARES: {name!r} isn't an SMB share name")
+        if not path.startswith("/") or "\x00" in path or posixpath.normpath(path) == "/":
+            raise ConfigError(f"SHARES: {name}: {path!r} should be the share's folder, an absolute path like /mnt/pool/dataset")
+        if name.casefold() in names:
+            raise ConfigError(f"SHARES: {name!r} is listed twice")
+        names.add(name.casefold())
+        root_id = _unique(_slug(name), ids)
+        ids.add(root_id)
+        roots.append(RootConfig(id=root_id, label=name, share_root=posixpath.normpath(path), smb_share=name))
+    if not roots:
+        raise ConfigError("SHARES is required: it lists no share")
+    return tuple(roots)
 
 
-def _parse_listen(raw: object) -> tuple[str, int]:
-    if not isinstance(raw, str) or ":" not in raw:
-        raise ConfigError('listen: expected "host:port"')
-    host, _, port_s = raw.rpartition(":")
-    host = host.strip("[]")
-    if not host or not port_s.isdigit() or not 0 < int(port_s) < 65536:
-        raise ConfigError('listen: expected "host:port"')
-    return host, int(port_s)
+def _slug(name: str) -> str:
+    """URL-safe id for a share: "Video Archive" → "video-archive"."""
+    ascii_name = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode()
+    slug = re.sub(r"[^a-z0-9]+", "-", ascii_name.lower()).strip("-")[:60].strip("-")
+    return slug or "share"
 
 
-def _abs_path(raw: object, where: str) -> str:
-    if not isinstance(raw, str) or not raw.startswith("/") or "\x00" in raw:
-        raise ConfigError(f"{where}: expected an absolute path")
-    return posixpath.normpath(raw)
+def _unique(slug: str, taken: set[str]) -> str:
+    n, candidate = 2, slug
+    while candidate in taken:
+        candidate, n = f"{slug}-{n}", n + 1
+    return candidate
 
 
-def _parse_root(raw: object, index: int) -> RootConfig:
-    where = f"roots[{index}]"
-    r = _mapping(raw, where, ROOT_KEYS)
-    root_id = r.get("id")
-    if not isinstance(root_id, str) or not ROOT_ID_RE.match(root_id):
-        raise ConfigError(f"{where}.id: required, lowercase letters, digits and dashes")
-    share_root = _abs_path(r.get("share_root"), f"{where}.share_root")
-    if share_root == "/":
-        raise ConfigError(f"{where}.share_root: must not be /")
-    smb_share = r.get("smb_share", posixpath.basename(share_root))
-    if not isinstance(smb_share, str) or not smb_share.strip() or BAD_SHARE_CHARS.search(smb_share):
-        raise ConfigError(f"{where}.smb_share: expected an SMB share name")
-    label = r.get("label", smb_share)
-    if not isinstance(label, str) or not label.strip():
-        raise ConfigError(f"{where}.label: expected a non-empty string")
-    dataset = r.get("dataset_mountpoint")
-    if dataset is not None:
-        dataset = _abs_path(dataset, f"{where}.dataset_mountpoint")
-    return RootConfig(
-        id=root_id,
-        label=label.strip(),
-        share_root=share_root,
-        dataset_mountpoint=dataset,
-        smb_share=smb_share.strip(),
-    )
+def parse_max_listed(raw: str | None) -> int:
+    text = (raw or "").strip()
+    if not text:
+        return DEFAULT_MAX_SNAPSHOTS_LISTED
+    if not text.isdigit() or int(text) < 1:
+        raise ConfigError(f"MAX_SNAPSHOTS_LISTED: expected a positive whole number, got {raw!r}")
+    return int(text)

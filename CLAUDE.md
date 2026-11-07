@@ -15,7 +15,7 @@ cd backend && python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
 cd backend && .venv/bin/pytest                                   # all tests
 cd backend && .venv/bin/pytest tests/test_browse.py::test_history_versions   # one test
 backend/.venv/bin/python backend/scripts/make_demo.py dev/demo    # simulated dataset + config
-cd backend && SNAPSHOT_PREFIXES=auto- SNAPBACK_CONFIG=../dev/demo/snapback.yaml .venv/bin/python scripts/dev_server.py   # sign in with demo / demo
+cd backend && set -a && . ../dev/demo/snapback.env && set +a && .venv/bin/python scripts/dev_server.py   # sign in with demo / demo
 ```
 
 Frontend (`frontend/`, npm):
@@ -34,6 +34,8 @@ npx tsc -b       # type-check only
 **No zfs CLI.** Snapshots are read as plain directories under `<dataset_mountpoint>/.zfs/snapshot/<name>/`. Tests and the demo generator simulate this with ordinary folders; identical file versions are hard links so they share inode and ctime, as unchanged files do across real snapshots.
 
 **Path model** (`backend/snapback/paths.py`). A configured `share_root` is the user-visible root. `dataset_mountpoint` is detected by walking up to the nearest `.zfs/snapshot`; `relative_prefix` is the share root relative to it. `Root.base(snapshot_name | None)` gives the share root live or inside a snapshot. `parse_rel()` is the only entry point for client paths: it rejects any segment starting with `.` (covers `..`, `.zfs` and hidden files). `opened_dir()` then walks segments with `O_NOFOLLOW` via `dir_fd`, so symlinks are never followed. `Missing`/`Denied` exceptions map to folder states, not errors.
+
+**Configuration** (`config.py`). Environment variables only, no config file: `SERVER_NAME`, `SHARES`, `SNAPSHOT_PREFIXES`, `SMB_HOST`, `ALLOWED_USERS` are required; `TZ`, `MAX_DOWNLOAD_GB`, `MAX_SNAPSHOTS_LISTED` optional. `SHARES` is one `SMB share name = /path` per line (comma-separated if it's one line); the share name is the label and the SMB share sign-in checks, and the root id is its slug (`Video Archive` → `video-archive`, made unique). The app listens on 8080 (and 8443 for HTTPS) inside the container. `deploy/compose.yaml` is the YAML users paste into TrueNAS; `.github/workflows/image.yml` tests and publishes `ghcr.io/<owner>/snapback` (`:edge` from `master`, `:X.Y.Z`/`:latest` from `vX.Y.Z` tags).
 
 **Snapshot filter** (`snapshots.py`). `SNAPSHOT_PREFIXES` env var is mandatory; `config.load_config` raises `ConfigError` before anything else and `__main__` exits 2. Only prefixed snapshots are enumerated; clients see them only as opaque ids (`sha256(name)[:16]`), never names. Time comes from the timestamp in the name, read in `TZ` (fallback: directory mtime). Same-minute snapshots are deduped. Lists are cached ~30 s per dataset.
 

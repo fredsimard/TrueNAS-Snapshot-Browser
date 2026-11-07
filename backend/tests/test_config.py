@@ -4,14 +4,21 @@ from snapback.config import (
     ConfigError,
     load_config,
     parse_allowed_users,
-    parse_config,
     parse_max_download,
+    parse_max_listed,
     parse_prefixes,
+    parse_shares,
     parse_smb_host,
     parse_timezone,
 )
 
-MINIMAL = {"server_label": "NAS01", "roots": [{"id": "projects", "share_root": "/mnt/tank/studio/Projects"}]}
+ENV = {
+    "SERVER_NAME": "NAS01",
+    "SHARES": "Projects = /mnt/tank/studio/Projects",
+    "SNAPSHOT_PREFIXES": "auto-",
+    "SMB_HOST": "192.0.2.10",
+    "ALLOWED_USERS": "all",
+}
 
 
 @pytest.mark.parametrize("raw", [None, "", "   ", ",", " , ,"])
@@ -27,47 +34,6 @@ def test_prefixes_trimmed_and_deduplicated():
 def test_prefix_with_slash_rejected():
     with pytest.raises(ConfigError):
         parse_prefixes("auto-,a/b")
-
-
-def test_load_config_checks_prefixes_before_reading_file(tmp_path):
-    with pytest.raises(ConfigError, match="SNAPSHOT_PREFIXES"):
-        load_config({"SNAPBACK_CONFIG": str(tmp_path / "missing.yaml")})
-
-
-def test_load_config(tmp_path):
-    p = tmp_path / "c.yaml"
-    p.write_text("server_label: X\nroots:\n  - id: a\n    share_root: /mnt/a/b\n")
-    cfg = load_config(
-        {
-            "SNAPBACK_CONFIG": str(p),
-            "SNAPSHOT_PREFIXES": "auto-",
-            "SMB_HOST": "192.0.2.10",
-            "ALLOWED_USERS": "Alice, bob",
-            "TZ": "America/Toronto",
-        }
-    )
-    assert cfg.snapshot_prefixes == ("auto-",)
-    assert cfg.smb_host == "192.0.2.10"
-    assert cfg.allowed_users == {"alice", "bob"}
-    assert cfg.timezone.key == "America/Toronto"
-    assert (cfg.host, cfg.port) == ("0.0.0.0", 8080)
-
-
-def test_missing_file(tmp_path):
-    with pytest.raises(ConfigError, match="not found"):
-        load_config(
-            {
-                "SNAPBACK_CONFIG": str(tmp_path / "nope.yaml"),
-                "SNAPSHOT_PREFIXES": "auto-",
-                "SMB_HOST": "192.0.2.10",
-                "ALLOWED_USERS": "all",
-            }
-        )
-
-
-def test_load_config_requires_allowed_users(tmp_path):
-    with pytest.raises(ConfigError, match="ALLOWED_USERS is required"):
-        load_config({"SNAPBACK_CONFIG": str(tmp_path / "missing.yaml"), "SNAPSHOT_PREFIXES": "auto-", "SMB_HOST": "192.0.2.10"})
 
 
 @pytest.mark.parametrize("raw", [None, "", "  ", ", ,"])
@@ -102,71 +68,6 @@ def test_smb_host_cannot_be_the_container(raw):
         parse_smb_host(raw)
 
 
-def test_label_and_share_default_to_share_folder_name():
-    cfg = parse_config(MINIMAL, ("auto-",))
-    assert cfg.roots[0].label == "Projects"
-    assert cfg.roots[0].share_name == "Projects"
-    assert cfg.roots[0].dataset_mountpoint is None
-
-
-def test_label_defaults_to_smb_share():
-    root = {"id": "v", "share_root": "/mnt/tank/v", "smb_share": "VIDEO_ARCHIVE"}
-    cfg = parse_config({**MINIMAL, "roots": [root]}, ("auto-",))
-    assert (cfg.roots[0].label, cfg.roots[0].share_name) == ("VIDEO_ARCHIVE", "VIDEO_ARCHIVE")
-    root["label"] = "Video Archive"
-    cfg = parse_config({**MINIMAL, "roots": [root]}, ("auto-",))
-    assert (cfg.roots[0].label, cfg.roots[0].share_name) == ("Video Archive", "VIDEO_ARCHIVE")
-
-
-def test_unknown_keys_rejected():
-    with pytest.raises(ConfigError, match="unknown key"):
-        parse_config({**MINIMAL, "auth": {"method": "smb"}}, ("auto-",))
-    with pytest.raises(ConfigError, match="unknown key"):
-        parse_config({**MINIMAL, "roots": [{"id": "a", "share_root": "/x/y", "prefixes": "z"}]}, ("auto-",))
-
-
-@pytest.mark.parametrize(
-    "root",
-    [
-        {"id": "Bad Id", "share_root": "/x/y"},
-        {"id": "a", "share_root": "relative/path"},
-        {"id": "a", "share_root": "/"},
-        {"id": "a", "share_root": "/x/y", "dataset_mountpoint": "x"},
-        {"id": "a", "share_root": "/x/y", "label": ""},
-        {"id": "a", "share_root": "/x/y", "smb_share": ""},
-        {"id": "a", "share_root": "/x/y", "smb_share": "a\\b"},
-        {"id": "a", "share_root": "/x/y", "smb_share": "a/b"},
-    ],
-)
-def test_invalid_roots(root):
-    with pytest.raises(ConfigError):
-        parse_config({**MINIMAL, "roots": [root]}, ("auto-",))
-
-
-def test_duplicate_root_ids():
-    roots = [{"id": "a", "share_root": "/x/y"}, {"id": "a", "share_root": "/x/z"}]
-    with pytest.raises(ConfigError, match="duplicate"):
-        parse_config({**MINIMAL, "roots": roots}, ("auto-",))
-
-
-@pytest.mark.parametrize("listen,expected", [("127.0.0.1:9000", ("127.0.0.1", 9000)), ("[::]:8080", ("::", 8080))])
-def test_listen(listen, expected):
-    cfg = parse_config({**MINIMAL, "listen": listen}, ("auto-",))
-    assert (cfg.host, cfg.port) == expected
-
-
-@pytest.mark.parametrize("listen", ["8080", "host:", "host:99999", 8080])
-def test_bad_listen(listen):
-    with pytest.raises(ConfigError, match="listen"):
-        parse_config({**MINIMAL, "listen": listen}, ("auto-",))
-
-
-@pytest.mark.parametrize("value", [0, -1, "10", True])
-def test_bad_max_snapshots(value):
-    with pytest.raises(ConfigError):
-        parse_config({**MINIMAL, "limits": {"max_snapshots_listed": value}}, ("auto-",))
-
-
 def test_timezone():
     assert parse_timezone(None) is None
     assert parse_timezone(":Europe/Paris").key == "Europe/Paris"
@@ -183,3 +84,81 @@ def test_max_download(raw, want):
 def test_max_download_invalid(raw):
     with pytest.raises(ConfigError, match="MAX_DOWNLOAD_GB"):
         parse_max_download(raw)
+
+
+def test_load_config():
+    cfg = load_config({**ENV, "ALLOWED_USERS": "Alice, bob", "TZ": "America/Toronto"})
+    assert cfg.server_label == "NAS01"
+    assert cfg.snapshot_prefixes == ("auto-",)
+    assert cfg.smb_host == "192.0.2.10"
+    assert cfg.allowed_users == {"alice", "bob"}
+    assert cfg.timezone.key == "America/Toronto"
+    assert (cfg.host, cfg.port) == ("0.0.0.0", 8080)
+    assert [(r.id, r.label, r.share_name, r.share_root) for r in cfg.roots] == [
+        ("projects", "Projects", "Projects", "/mnt/tank/studio/Projects")
+    ]
+
+
+@pytest.mark.parametrize("missing", ["SERVER_NAME", "SHARES", "SNAPSHOT_PREFIXES", "SMB_HOST", "ALLOWED_USERS"])
+def test_required(missing):
+    with pytest.raises(ConfigError, match=f"{missing} is required"):
+        load_config({k: v for k, v in ENV.items() if k != missing})
+
+
+def test_prefixes_are_checked_first():
+    with pytest.raises(ConfigError, match="SNAPSHOT_PREFIXES"):
+        load_config({})
+
+
+def test_shares_one_per_line_or_comma_separated():
+    lines = parse_shares("""
+        Projects = /mnt/tank/studio/Projects
+        # a comment
+        Video Archive=/mnt/tank/video/
+
+        Été = /mnt/tank/ete
+    """)
+    assert [(r.id, r.label, r.share_root) for r in lines] == [
+        ("projects", "Projects", "/mnt/tank/studio/Projects"),
+        ("video-archive", "Video Archive", "/mnt/tank/video"),
+        ("ete", "Été", "/mnt/tank/ete"),
+    ]
+    assert [r.id for r in parse_shares("A=/mnt/a, B=/mnt/b")] == ["a", "b"]
+
+
+def test_a_path_with_a_comma_needs_one_share_per_line():
+    roots = parse_shares("Clients=/mnt/tank/Smith, Jones\nOther=/mnt/tank/other")
+    assert roots[0].share_root == "/mnt/tank/Smith, Jones"
+
+
+def test_ids_stay_unique():
+    assert [r.id for r in parse_shares("A b=/mnt/1\nA-b=/mnt/2\n!!!=/mnt/3")] == ["a-b", "a-b-2", "share"]
+
+
+@pytest.mark.parametrize(
+    "raw,match",
+    [
+        ("Projects", "should be NAME"),
+        ("= /mnt/x", "should be NAME"),
+        ("Projects = mnt/x", "absolute path"),
+        ("Projects = /", "absolute path"),
+        ("a/b = /mnt/x", "isn't an SMB share name"),
+        ("a\\b = /mnt/x", "isn't an SMB share name"),
+        ("A = /mnt/x\na = /mnt/y", "listed twice"),
+        ("# only a comment", "lists no share"),
+    ],
+)
+def test_bad_shares(raw, match):
+    with pytest.raises(ConfigError, match=match):
+        parse_shares(raw)
+
+
+@pytest.mark.parametrize("raw,want", [(None, 500), ("", 500), ("50", 50)])
+def test_max_listed(raw, want):
+    assert parse_max_listed(raw) == want
+
+
+@pytest.mark.parametrize("raw", ["0", "-1", "ten", "1.5"])
+def test_bad_max_listed(raw):
+    with pytest.raises(ConfigError, match="MAX_SNAPSHOTS_LISTED"):
+        parse_max_listed(raw)

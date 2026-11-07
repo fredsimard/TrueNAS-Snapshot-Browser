@@ -66,33 +66,26 @@ Worked example:
 
 `relative_prefix` exists solely so the app can step back down to the share root inside each snapshot. It is never rendered.
 
-Auto-detecting `dataset_mountpoint` by walking parent directories means per-server config is just a list of share roots, which is what the administrator already knows. Allow an explicit override for cases where auto-detection is wrong.
+Auto-detecting `dataset_mountpoint` by walking parent directories means per-server config is just a list of share roots, which is what the administrator already knows. (An explicit override existed with the config file; it went with it.)
 
 `rel` is canonicalised and rejected if it escapes the root. Because `rel` is the only path input the app accepts, containment has a single choke point. Snapshot names are validated against the enumerated list, never interpolated from user input.
 
 ## 6. Configuration
 
-One config file per server, same image everywhere:
+Environment variables only, set in the app's YAML, same image everywhere (README.md lists them all):
 
 ```yaml
-server_label: "NAS01"
-listen: 0.0.0.0:8080
-roots:
-  - id: projects
-    label: "Projects"
-    share_root: /mnt/tank/studio/Projects
-  - id: web-marketing
-    label: "Web Marketing"
-    share_root: /mnt/tank/studio/Web Marketing
-  - id: video-archive
-    label: "Video Archive"
-    share_root: /mnt/tank/studio/VIDEO_ARCHIVE
-limits:
-  max_download_bytes: 21474836480
-  max_snapshots_listed: 500
+SERVER_NAME: "NAS01"
+SHARES: |
+  Projects = /mnt/tank/studio/Projects
+  Web Marketing = /mnt/tank/studio/Web Marketing
+  VIDEO_ARCHIVE = /mnt/tank/studio/VIDEO_ARCHIVE
+MAX_DOWNLOAD_GB: "20"
 ```
 
-Multiple roots per instance; one instance per server. Roots sharing a dataset resolve to the same `.zfs` tree with different prefixes, which the path model handles for free.
+Each share is the SMB share name users connect to and the share's path; the name is what users see. There is no config file: TrueNAS installs apps from the GUI, where a file on the NAS would need SSH.
+
+Multiple shares per instance; one instance per server. Roots sharing a dataset resolve to the same `.zfs` tree with different prefixes, which the path model handles for free.
 
 **Snapshot filter.** Set at app creation through the `SNAPSHOT_PREFIXES` environment variable: a comma-separated list of snapshot name prefixes (e.g. `auto-,daily-`). Users only see snapshots whose names start with one of them, so the administrator picks which snapshot tasks are exposed. The field is mandatory: TrueNAS custom apps can't mark an environment variable as required, so the app refuses to start and logs why when it is empty. Snapshots outside the filter are unreachable, not just hidden: they can't be addressed through the API, and `.zfs` can't be reached through a relative path.
 

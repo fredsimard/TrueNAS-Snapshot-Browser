@@ -3,7 +3,7 @@
 
 Fake sign-in lives here and not behind a flag in the app, so a deployed image can't enable it.
 
-    SNAPSHOT_PREFIXES=auto- SNAPBACK_CONFIG=../dev/demo/snapback.yaml python scripts/dev_server.py
+    set -a; . ../dev/demo/snapback.env; set +a; python scripts/dev_server.py
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ def main() -> None:
 
     # Reads files as whoever runs this script: no privilege drop.
     app = create_app(config, verify=sign_in, backend=InProcessBackend(Ops.from_config(config)))
-    uvicorn.run(app, host=config.host, port=config.port)
+    uvicorn.run(app, host="127.0.0.1", port=config.port)
 
 
 if __name__ == "__main__":

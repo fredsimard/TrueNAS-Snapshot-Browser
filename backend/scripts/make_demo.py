@@ -4,13 +4,14 @@
     python scripts/make_demo.py ../dev/demo
 
 Creates <out>/mnt/STUDIO/STUDIO/{Production,Scratch} with hourly (48 h), daily (14 days) and
-weekly snapshots under .zfs/snapshot, plus <out>/snapback.yaml. Files are sparse and hard-linked
-across snapshots, so the tree takes almost no disk space.
+weekly snapshots under .zfs/snapshot, plus <out>/snapback.env (the settings, in shell syntax).
+Files are sparse and hard-linked across snapshots, so the tree takes almost no disk space.
 """
 
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
 import stat
 import sys
@@ -157,15 +158,11 @@ def main() -> int:
     populate(dataset / ".zfs" / "snapshot" / (points[-3].strftime("manual-%Y-%m-%d_%H-%M")), points[-3])
     populate(dataset, now)
 
-    (out / "snapback.yaml").write_text(
-        "server_label: Studio Server\n"
-        "listen: 127.0.0.1:8080\n"
-        "roots:\n"
-        f"  - id: production\n    share_root: {dataset / 'Production'}\n"
-        f"  - id: scratch\n    share_root: {dataset / 'Scratch'}\n"
-    )
+    shares = f"Production = {dataset / 'Production'}\nScratch = {dataset / 'Scratch'}"
+    env = {"SERVER_NAME": "Studio Server", "SNAPSHOT_PREFIXES": "auto-", "SHARES": shares}
+    (out / "snapback.env").write_text("".join(f"{k}={shlex.quote(v)}\n" for k, v in env.items()))
     print(f"{len(points)} snapshots in {dataset}")
-    print(f"SNAPSHOT_PREFIXES=auto- SNAPBACK_CONFIG={out / 'snapback.yaml'} python scripts/dev_server.py")
+    print(f"set -a; . {out / 'snapback.env'}; set +a; python scripts/dev_server.py")
     return 0
 
 
