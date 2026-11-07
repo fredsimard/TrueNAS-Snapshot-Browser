@@ -39,18 +39,20 @@ All data in the mockups is made up: server "Studio Server", the shares, the file
 
 ## Browse layout (1440 × 960 reference)
 
-- Header 44 px: server name, then `Breadcrumb` starting at the share name, then the user `DropdownMenu` on the right.
-- Time section, about 106 px, muted background:
-  - Row 1: "As of" + point label (17 px, semibold) + full date in muted text.
+- Header 72 px, 24 px padding on the sides, so the logo has the same space on all sides: server name on the left; "All shares", the theme button and the user `DropdownMenu` on the right.
+- Below the header, 24 px around and between zones. Each zone is its own box: 1 px border, 10 px radius.
+- Time section box, muted background, 16 px padding on all sides:
+  - Row 1, 28 px: "As of" + point label (17 px, semibold) + full date in muted text. At Now, just "As of Now".
   - Filter `ToggleGroup`: All / Changed / Deleted, each with its count. Hidden at Now.
   - Step ← → buttons with a `Tooltip` holding `Kbd` ← →.
   - "Pick a date" (`Popover` + `Calendar`).
   - "Back to Now" (primary button, hidden at Now).
-  - Row 2: the timeline, 50 px.
-- Listing: `Data Table`. Header 28 px, rows 22 px, no row borders, 13 px text.
+  - Row 2, 12 px below: the timeline, 60 px. Its marks sit as far from the top edge as the labels from the bottom.
+- `Breadcrumb` box, 40 px, starting at the share name, above the listing.
+- Listing box: `Data Table`. Header 28 px, rows 22 px, no row borders, 13 px text.
   - Columns: checkbox 40 · Name (flex) · Date Modified 224 · Size 96 (right-aligned) · Kind 208.
-- No footer: the item count duplicated the filter chips and the date duplicated the time section (removed after testing). When items are selected, a 36 px bar appears below the listing with "N selected" and a Download button.
-- File detail `Sheet`: 384 px, docked on the right. It pushes the listing narrower instead of overlaying it: no overlay, non-modal. It opens for files only.
+- Item count under the listing, bottom left, 12 px below it: "34 files and 56 folders", "23 folders", "5 files", "1 file", "1 folder". It counts the rows shown, so it follows the filter. Empty while loading and when a folder state replaces the listing. When items are selected, a 36 px bar appears below the listing with "N selected" and a Download button.
+- File detail `Sheet`: 384 px box on the right, level with the breadcrumb box. It pushes the breadcrumb and listing narrower instead of overlaying them: no overlay, non-modal. It opens for files only.
 
 ## Timeline
 

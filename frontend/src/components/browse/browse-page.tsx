@@ -18,7 +18,7 @@ import {
 import { useNow } from '@/hooks/use-now'
 import { useRequest } from '@/hooks/use-request'
 import { api, ApiError, NOW, type Info } from '@/lib/api'
-import { shortDay } from '@/lib/format'
+import { itemCount, shortDay } from '@/lib/format'
 import { navigate, routeHref, useLinkHandler } from '@/lib/router'
 import { sortRows, toRows } from '@/lib/rows'
 import { buildTimePoints } from '@/lib/timeline'
@@ -155,6 +155,7 @@ export function BrowsePage({
 
   // Main area.
   let body: React.ReactNode
+  let total = ''
   const label = cur?.label ?? ''
   if (folderReq.error && !unknownPoint && !folderReq.loading) {
     body = (
@@ -213,6 +214,8 @@ export function BrowsePage({
       )
     }
   } else {
+    const folders = shown.filter((r) => r.dir).length
+    total = itemCount(shown.length - folders, folders)
     body = (
       <>
         <FileTable {...tableProps()} rows={shown} skeleton={false} stale={!fresh} />
@@ -257,69 +260,75 @@ export function BrowsePage({
             </a>
           )
         }
-      >
-        <Breadcrumb className="min-w-0">
-          <BreadcrumbList className="flex-nowrap gap-1.5 text-[13px] sm:gap-1.5">
-            {[root.label, ...parts].map((text, i, arr) => (
-              <Fragment key={i}>
-                {i > 0 && <BreadcrumbSeparator />}
-                <BreadcrumbItem className="min-w-0">
-                  {i === arr.length - 1 ? (
-                    <BreadcrumbPage className="truncate font-medium">{text}</BreadcrumbPage>
-                  ) : (
-                    <BreadcrumbLink asChild>
-                      <a className="truncate" href={routeHref(rootId, parts.slice(0, i), at)} onClick={onLink}>
-                        {text}
-                      </a>
-                    </BreadcrumbLink>
-                  )}
-                </BreadcrumbItem>
-              </Fragment>
-            ))}
-          </BreadcrumbList>
-        </Breadcrumb>
-      </AppHeader>
+      />
 
-      {points && cur ? (
-        <TimeBar
-          points={points}
-          selected={selected}
-          now={now}
-          onSelect={(i) => goTo(points[i].id)}
-          onPickDate={(i, exact, day) => {
-            goTo(points[i].id)
-            const dayText = shortDay(day)
-            if (exact) {
-              toast(`Showing ${points[i].label}`, {
-                description: points[i].isNow ? 'That is the share as it is right now.' : `The last version from ${dayText}.`,
-              })
-            } else {
-              toast(`No version from ${dayText}`, { description: `Showing ${points[i].label}, the closest one.` })
-            }
-          }}
-          filter={effFilter}
-          onFilter={setFilter}
-          counts={folder?.state === 'ok' && fresh && all.length > 0 ? counts : null}
-        />
-      ) : (
-        <div className="h-[113px] shrink-0 border-b bg-subtle" />
-      )}
-
-      <div className="flex min-h-0 grow">
-        <div className="relative flex min-w-0 grow flex-col">
-          {body}
-        </div>
-        {openName && points && cur && (
-          <HistoryPanel
-            name={openName}
-            history={historyReq.dataKey === historyKey ? historyReq.data : undefined}
-            error={!!historyReq.error}
+      <div className="flex min-h-0 grow flex-col gap-6 p-6">
+        {points && cur ? (
+          <TimeBar
             points={points}
             selected={selected}
             now={now}
-            onClose={() => setOpenFile(null)}
+            onSelect={(i) => goTo(points[i].id)}
+            onPickDate={(i, exact, day) => {
+              goTo(points[i].id)
+              const dayText = shortDay(day)
+              if (exact) {
+                toast(`Showing ${points[i].label}`, {
+                  description: points[i].isNow ? 'That is the share as it is right now.' : `The last version from ${dayText}.`,
+                })
+              } else {
+                toast(`No version from ${dayText}`, { description: `Showing ${points[i].label}, the closest one.` })
+              }
+            }}
+            filter={effFilter}
+            onFilter={setFilter}
+            counts={folder?.state === 'ok' && fresh && all.length > 0 ? counts : null}
           />
+        ) : (
+          <div className="h-[134px] shrink-0 rounded-lg border bg-subtle" />
         )}
+
+        <div className="flex min-h-0 grow gap-6">
+          <div className="flex min-w-0 grow flex-col">
+            <div className="flex h-10 shrink-0 items-center rounded-lg border px-4">
+              <Breadcrumb className="min-w-0">
+                <BreadcrumbList className="flex-nowrap gap-1.5 text-[13px] sm:gap-1.5">
+                  {[root.label, ...parts].map((text, i, arr) => (
+                    <Fragment key={i}>
+                      {i > 0 && <BreadcrumbSeparator />}
+                      <BreadcrumbItem className="min-w-0">
+                        {i === arr.length - 1 ? (
+                          <BreadcrumbPage className="truncate font-medium">{text}</BreadcrumbPage>
+                        ) : (
+                          <BreadcrumbLink asChild>
+                            <a className="truncate" href={routeHref(rootId, parts.slice(0, i), at)} onClick={onLink}>
+                              {text}
+                            </a>
+                          </BreadcrumbLink>
+                        )}
+                      </BreadcrumbItem>
+                    </Fragment>
+                  ))}
+                </BreadcrumbList>
+              </Breadcrumb>
+            </div>
+            <div className="relative mt-6 flex min-h-0 grow flex-col overflow-hidden rounded-lg border">{body}</div>
+            <p className="mt-3 h-[18px] shrink-0 px-1 text-[12.5px] text-muted-foreground tabular-nums" aria-live="polite">
+              {total}
+            </p>
+          </div>
+          {openName && points && cur && (
+            <HistoryPanel
+              name={openName}
+              history={historyReq.dataKey === historyKey ? historyReq.data : undefined}
+              error={!!historyReq.error}
+              points={points}
+              selected={selected}
+              now={now}
+              onClose={() => setOpenFile(null)}
+            />
+          )}
+        </div>
       </div>
     </div>
   )

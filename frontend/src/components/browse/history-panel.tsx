@@ -40,7 +40,7 @@ export function HistoryPanel({
   const changed = !deleted && !atNow && viewingVersion !== undefined && !viewingVersion.current
 
   return (
-    <aside aria-label="File history" className="flex w-96 shrink-0 flex-col border-l bg-subtle">
+    <aside aria-label="File history" className="flex w-96 shrink-0 flex-col overflow-hidden rounded-lg border bg-subtle">
       <div className="flex items-start gap-3 border-b py-4 pr-3 pl-4">
         <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-foreground/70">
           <FileIcon kind={iconKind(kind)} className="size-[18px] text-inherit" />

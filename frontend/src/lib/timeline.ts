@@ -32,7 +32,7 @@ export function buildTimePoints(points: Point[], now: Date): TimePoint[] {
     day: now,
     midnight: false,
     label: 'Now',
-    long: 'The share as it is right now',
+    long: '',
     isNow: true,
   })
   return out

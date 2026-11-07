@@ -59,6 +59,15 @@ export function formatSize(bytes: number | null): string {
   return `${(bytes / 1e9).toFixed(2)} GB`
 }
 
+/** "34 files and 56 folders", "23 folders", "1 file"; empty when there's nothing. */
+export function itemCount(files: number, folders: number): string {
+  const part = (n: number, one: string) => `${n.toLocaleString('en-US')} ${one}${n === 1 ? '' : 's'}`
+  if (files && folders) return `${part(files, 'file')} and ${part(folders, 'folder')}`
+  if (folders) return part(folders, 'folder')
+  if (files) return part(files, 'file')
+  return ''
+}
+
 const KINDS: Record<string, string> = {
   jpg: 'JPEG image', jpeg: 'JPEG image', png: 'PNG image', gif: 'GIF image', webp: 'WebP image',
   tif: 'TIFF image', tiff: 'TIFF image', heic: 'HEIF image', heif: 'HEIF image', bmp: 'BMP image',

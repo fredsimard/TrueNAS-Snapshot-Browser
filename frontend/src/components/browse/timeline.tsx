@@ -46,9 +46,10 @@ export function Timeline({
   const selX = atNow ? right : xs[selected]
 
   return (
-    <div ref={ref} className="relative h-[52px] rounded-md bg-timeline-track select-none">
+    <div ref={ref} className="relative h-[60px] rounded-md bg-timeline-track select-none">
+      {/* Offset so the marks sit as far from the top edge as the labels do from the bottom. */}
       {width > 0 && (
-        <>
+        <div className="absolute inset-x-0 top-[5px]">
           {marks.map((m) => (
             <div key={m.text}>
               <span className="absolute top-0.5 h-7 w-px bg-foreground/15" style={{ left: m.x }} />
@@ -118,7 +119,7 @@ export function Timeline({
               {points[hovered].label}
             </TickLabel>
           )}
-        </>
+        </div>
       )}
     </div>
   )
