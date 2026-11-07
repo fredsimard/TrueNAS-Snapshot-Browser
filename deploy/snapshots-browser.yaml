@@ -1,0 +1,126 @@
+# ─────────────────────────────────────────────────────────────────────────────────────────────────
+#  Snapshots Browser for TrueNAS SCALE: the app's YAML
+# ─────────────────────────────────────────────────────────────────────────────────────────────────
+#
+#  HOW TO INSTALL
+#    1. In TrueNAS: Apps → Discover Apps → ⋮ (top right) → Install via YAML.
+#       (Not the Custom App wizard: it can't set "propagation: rslave" below, and without it the
+#       app sees every snapshot as empty.)
+#    2. Name the app, e.g. snapshots-browser.
+#    3. Paste this whole file, then change every value marked  ◀ CHANGE  for your server.
+#       Values marked  ◀ CHECK  have a sensible default; read the note and keep or adjust.
+#    4. Save. Open http://<your NAS>:18080 (and https://<your NAS>:18443 if you set up HTTPS).
+#
+#  If a setting is missing or wrong, the app stops right away and says which one in its log:
+#  Apps → the app → Logs. Fix the YAML (Apps → the app → Edit) and save again.
+#
+#  The app only reads. It never writes to, renames or deletes anything on the NAS.
+# ─────────────────────────────────────────────────────────────────────────────────────────────────
+
+services:
+  snapshots-browser:
+    # The version to run. To update later, change the number after ":" and save; see the
+    # project's Releases page on GitHub for the latest one.
+    image: ghcr.io/fredsimard/snapshots-browser:1.0.0
+    # Keep this: the app restarts itself when the NAS's accounts or certificate change, so that it
+    # picks up the new ones, and needs to come back up afterwards.
+    restart: unless-stopped
+
+    environment:
+      # ── Server name ────────────────────────────────────────────────────────────────────────────
+      # Shown at the top of the app and on its sign-in page. Use the name your users know the
+      # server by.
+      SERVER_NAME: "Studio Server" # ◀ CHANGE
+
+      # ── This NAS's address ─────────────────────────────────────────────────────────────────────
+      # Users sign in with the same username and password they use for the SMB shares; the app
+      # checks them by connecting to the NAS's SMB service at this address. Use the NAS's own
+      # network address (Network → Interfaces), not 127.0.0.1: inside the app, that's the app.
+      SMB_HOST: "192.168.1.10" # ◀ CHANGE
+
+      # ── Shares ─────────────────────────────────────────────────────────────────────────────────
+      # The SMB shares users may browse, one per line:   share name = path on the NAS
+      # Copy both from Shares → Windows (SMB) Shares: the "Name" column and the "Path" column.
+      # The share name is what users see. After sign-in, each user only sees the shares that
+      # Samba lets their account use. Keep the "|" on the first line.
+      SHARES: | # ◀ CHANGE
+        Projects = /mnt/tank/studio/Projects
+        Video Archive = /mnt/tank/video
+
+      # ── Which snapshots users see ──────────────────────────────────────────────────────────────
+      # The start of the snapshot names to show, comma-separated. Other snapshots stay hidden.
+      # Data Protection → Periodic Snapshot Tasks shows each task's "Naming Schema": for the
+      # default "auto-%Y-%m-%d_%H-%M", the prefix is "auto-".
+      SNAPSHOT_PREFIXES: "auto-" # ◀ CHECK
+
+      # ── Who may use the app ────────────────────────────────────────────────────────────────────
+      # "all": every account that can sign in to the shares. Or a comma-separated list of
+      # usernames, e.g. "alice,bob" (case doesn't matter).
+      ALLOWED_USERS: "all" # ◀ CHECK
+
+      # ── Time zone ──────────────────────────────────────────────────────────────────────────────
+      # The NAS's time zone (System → General Settings → Localization). TrueNAS writes snapshot
+      # times in it, and dates in download names use it too.
+      TZ: "America/Toronto" # ◀ CHANGE
+
+      # ── Download limit ─────────────────────────────────────────────────────────────────────────
+      # The largest folder or selection, in GB, that can be downloaded as one zip. Larger ones
+      # are refused with a message before anything starts. Single files have no limit.
+      MAX_DOWNLOAD_GB: "20" # ◀ CHECK
+
+    ports:
+      # "port on the NAS:port in the app". Change the left-hand numbers if they're already in use
+      # on the NAS; leave 8080 and 8443 as they are.
+      - "18080:8080" # HTTP: http://<your NAS>:18080
+      - "18443:8443" # HTTPS: https://<your NAS>:18443, only with a certificate (end of file)
+
+    volumes:
+      # ── Your data (read-only) ──────────────────────────────────────────────────────────────────
+      # One entry per DATASET that holds a share listed in SHARES. Use the dataset itself, not
+      # the share's folder: snapshots live at the dataset's top, in its hidden .zfs folder.
+      # Datasets shows each dataset's path ("Mountpoint"). Example: the share "Projects" is
+      # /mnt/tank/studio/Projects, a folder inside the dataset /mnt/tank/studio, so mount
+      # /mnt/tank/studio. If a share's path IS a dataset, mount that path.
+      #   - source and target: the same path.
+      #   - Keep read_only and propagation: rslave. Without rslave, snapshots look empty.
+      # Copy the block once per dataset; two shares in the same dataset need it only once.
+      - type: bind
+        source: /mnt/tank/studio # ◀ CHANGE
+        target: /mnt/tank/studio # ◀ CHANGE (same as source)
+        read_only: true
+        bind:
+          propagation: rslave
+      - type: bind
+        source: /mnt/tank/video # ◀ CHANGE, or delete this block
+        target: /mnt/tank/video # ◀ CHANGE (same as source)
+        read_only: true
+        bind:
+          propagation: rslave
+
+      # ── The NAS's accounts (read-only, required) ───────────────────────────────────────────────
+      # The app reads every file as the signed-in user, so the NAS's own permissions decide what
+      # each person can see. It looks the account up here. Keep both entries as they are.
+      - type: bind
+        source: /etc/passwd
+        target: /host/etc/passwd
+        read_only: true
+      - type: bind
+        source: /etc/group
+        target: /host/etc/group
+        read_only: true
+
+      # ── HTTPS (optional) ───────────────────────────────────────────────────────────────────────
+      # To serve HTTPS with the NAS's own certificate, keep these two entries and put the
+      # certificate's name in both paths: Credentials → Certificates lists the names, and TrueNAS
+      # keeps each one as /etc/certificates/<name>.crt and <name>.key. Pick the certificate for
+      # the address users type (its name, not the IP, or browsers will warn).
+      # HTTP keeps working alongside. Without HTTPS, delete these two entries: passwords then
+      # cross the network unencrypted.
+      - type: bind
+        source: /etc/certificates/nas-example-com.crt # ◀ CHANGE, or delete this block
+        target: /host/tls/tls.crt
+        read_only: true
+      - type: bind
+        source: /etc/certificates/nas-example-com.key # ◀ CHANGE, or delete this block
+        target: /host/tls/tls.key
+        read_only: true

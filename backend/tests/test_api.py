@@ -4,10 +4,10 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from snapback.api import create_app
-from snapback.config import Config, RootConfig
-from snapback.ops import Ops
-from snapback.workers import InProcessBackend
+from snapshots_browser.api import create_app
+from snapshots_browser.config import Config, RootConfig
+from snapshots_browser.ops import Ops
+from snapshots_browser.workers import InProcessBackend
 
 SNAPS = ["auto-2026-09-20_00-00", "auto-2026-09-21_00-00"]
 
@@ -121,7 +121,7 @@ def test_bad_paths(setup, path):
 
 
 def test_filtered_snapshot_is_unreachable(setup):
-    from snapback.snapshots import snapshot_id
+    from snapshots_browser.snapshots import snapshot_id
 
     client, _ = setup
     r = client.get("/api/roots/projects/folder", params={"at": snapshot_id("manual-2026-09-22_00-00")})

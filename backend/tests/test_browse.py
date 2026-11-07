@@ -2,11 +2,11 @@ import time
 
 import pytest
 
-from snapback import browse
-from snapback.browse import Timeline, file_history, list_folder, nearest
-from snapback.config import RootConfig
-from snapback.paths import observe_file, resolve_root
-from snapback.snapshots import SnapshotIndex
+from snapshots_browser import browse
+from snapshots_browser.browse import Timeline, file_history, list_folder, nearest
+from snapshots_browser.config import RootConfig
+from snapshots_browser.paths import observe_file, resolve_root
+from snapshots_browser.snapshots import SnapshotIndex
 
 DAY = 86_400
 T0 = 1_758_340_800

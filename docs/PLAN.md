@@ -1,4 +1,4 @@
-# PLAN.md — ZFS Snapshot Self-Service Recovery (working name: `snapback`)
+# PLAN.md — ZFS Snapshot Self-Service Recovery (now Snapshots Browser)
 
 ## 1. Objective
 

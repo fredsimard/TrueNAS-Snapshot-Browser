@@ -3,8 +3,8 @@ requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "snapback"
-version = "0.1.0"
+name = "snapshots-browser"
+version = "1.0.0"
 description = "Self-service browsing of ZFS snapshots of an SMB share"
 requires-python = ">=3.10"
 dependencies = [
@@ -18,7 +18,7 @@ dependencies = [
 dev = ["pytest>=8", "httpx2>=2.13"]
 
 [tool.setuptools.packages.find]
-include = ["snapback*"]
+include = ["snapshots_browser*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

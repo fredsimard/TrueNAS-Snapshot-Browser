@@ -14,8 +14,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     SNAPBACK_STATIC_DIR=/app/static
 WORKDIR /app
 COPY backend/pyproject.toml ./
-COPY backend/snapback ./snapback
-RUN pip install --no-cache-dir . && rm -rf snapback pyproject.toml
+COPY backend/snapshots_browser ./snapshots_browser
+RUN pip install --no-cache-dir . && rm -rf snapshots_browser pyproject.toml
 COPY --from=frontend /src/dist /app/static
 EXPOSE 8080
-CMD ["python", "-m", "snapback"]
+CMD ["python", "-m", "snapshots_browser"]

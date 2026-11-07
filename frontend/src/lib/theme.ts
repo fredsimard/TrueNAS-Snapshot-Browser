@@ -3,7 +3,7 @@ import { useSyncExternalStore } from 'react'
 export type Theme = 'system' | 'light' | 'dark'
 
 // Also read by the inline script in index.html, which applies the theme before first paint.
-const STORAGE_KEY = 'snapback-theme'
+const STORAGE_KEY = 'snapshots-browser-theme'
 
 const media = window.matchMedia('(prefers-color-scheme: dark)')
 const listeners = new Set<() => void>()

@@ -3,7 +3,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from snapback.snapshots import SnapshotIndex, snapshot_id, time_from_name
+from snapshots_browser.snapshots import SnapshotIndex, snapshot_id, time_from_name
 
 TZ = ZoneInfo("America/Toronto")
 
