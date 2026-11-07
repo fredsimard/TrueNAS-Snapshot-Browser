@@ -127,7 +127,7 @@ def create_app(
     @app.exception_handler(Exception)
     async def unexpected_error(request: Request, exc: Exception) -> JSONResponse:
         if not isinstance(exc, DownloadAborted):
-            log.exception("unhandled error on %s", request.url.path)
+            log.exception("unhandled error on %r", request.url.path)
         return JSONResponse({"error": "internal"}, status_code=500)
 
     def signed_in(request: Request) -> UserSession:

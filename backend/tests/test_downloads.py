@@ -151,6 +151,30 @@ def test_a_single_file_among_names_that_are_gone_downloads_that_file(client):
     assert client.get(f"/api/downloads/{r['id']}/progress").json()["state"] == "done"
 
 
+def test_the_audit_line_cannot_be_forged_through_names(client, caplog):
+    forged = "x\n2026-11-07 12:00:00,000 INFO snapback.audit: download done by 'bob': file salaries.xlsx"
+    r = prepare(client, ["logo.psd", "notes.txt", forged], at=client.snap).json()
+    assert r["kind"] == "zip"
+    with caplog.at_level(logging.INFO, "snapback.audit"):
+        client.get(f"/api/downloads/{r['id']}")
+    (record,) = caplog.records
+    line = record.getMessage()
+    assert "\n" not in line and "salaries" not in line  # not a name that was downloaded
+    assert "logo.psd" in line and "notes.txt" in line
+
+
+def test_the_audit_line_escapes_names_on_the_share(client, ds, caplog):
+    blob = ds.blob(b"x", 1_700_000_000)
+    os.link(blob.path, ds.mountpoint / "Projects" / "LOGOS" / "we\nird\r.txt")
+    r = prepare(client, ["we\nird\r.txt"]).json()
+    assert r["kind"] == "file"
+    with caplog.at_level(logging.INFO, "snapback.audit"):
+        assert client.get(f"/api/downloads/{r['id']}").content == b"x"
+    line = caplog.records[-1].getMessage()
+    assert "\n" not in line and "\r" not in line
+    assert "we\\nird\\r.txt" in line
+
+
 def test_folder_downloads_as_a_zip(client, tmp_path):
     r = prepare(client, ["LOGOS"], path="", at=client.snap).json()
     assert (r["kind"], r["name"], r["files"], r["folders"]) == ("zip", "LOGOS (2026-09-20 14.00).zip", 3, 2)
