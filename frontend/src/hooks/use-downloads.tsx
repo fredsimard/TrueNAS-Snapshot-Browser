@@ -36,6 +36,9 @@ type Dialog =
 const POLL_MS = 1000
 const SLOW_PLAN_MS = 1000
 const SHOW_PROGRESS_AFTER_MS = 1200
+// The server marks a download running as soon as the browser asks for it, so one still waiting this
+// long was never requested.
+const START_TIMEOUT_MS = 30_000
 
 /**
  * Downloads: a file starts at once, a folder or several items after a confirm dialog stating the
@@ -207,6 +210,16 @@ function follow(plan: Ready) {
     } else if (p.state === 'cancelled') {
       if (stoppedHere) toast.dismiss(id)
       else toast('Download stopped', { id, description: plan.name, duration: 4000, action: undefined })
+    } else if (p.state === 'ready' && performance.now() - started >= START_TIMEOUT_MS) {
+      // The browser never asked for it, and every poll keeps the session from expiring: stop here,
+      // and release the download on the server.
+      api.cancelDownload(plan.id).catch(() => {})
+      toast('The download didn’t start', {
+        id,
+        description: 'Try again; if it keeps happening, ask IT.',
+        duration: 10_000,
+        action: undefined,
+      })
     } else {
       const now = performance.now()
       if (p.sent > 0 && !first) first = { t: now, sent: p.sent }
