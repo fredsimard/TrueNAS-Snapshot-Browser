@@ -9,6 +9,7 @@ the signed-in account (workers.py); this process never reads a share.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import secrets
@@ -49,6 +50,8 @@ from .workers import Backend, WorkerUnavailable
 log = logging.getLogger(__name__)
 
 SESSION_COOKIE = "snapback_session"
+MAX_LOGIN_BODY_BYTES = 16 << 10  # a username and a password
+MAX_BODY_BYTES = 8 << 20  # a download request naming up to MAX_NAMES items
 
 
 class LoginRequest(BaseModel):
@@ -60,6 +63,49 @@ class DownloadRequest(BaseModel):
     path: str = Field("", max_length=8192)  # the folder the items are in
     at: str = Field("now", max_length=64)
     names: list[str] = Field(min_length=1, max_length=MAX_NAMES)
+
+
+class BodyLimit:
+    """Plain ASGI middleware: refuses a request whose body is over the limit before any of it is read.
+
+    FastAPI reads a whole body into memory before validating it, so without this anyone, signed in or
+    not, could make the web process hold as much as they care to send. The size is the declared
+    Content-Length, which the HTTP server enforces; a body of unknown length (chunked) is refused.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        headers = dict(scope["headers"])
+        limit = MAX_LOGIN_BODY_BYTES if scope["path"] == "/api/login" else MAX_BODY_BYTES
+        if b"transfer-encoding" in headers:
+            return await self._refuse(send, 411, "length_required")
+        declared = headers.get(b"content-length")
+        if declared is not None:
+            try:
+                too_big = int(declared) > limit
+            except ValueError:
+                too_big = True
+            if too_big:
+                return await self._refuse(send, 413, "payload_too_large")
+        await self.app(scope, receive, send)
+
+    @staticmethod
+    async def _refuse(send, status: int, code: str) -> None:
+        body = json.dumps({"error": code}).encode()
+        await send({
+            "type": "http.response.start",
+            "status": status,
+            "headers": [
+                (b"content-type", b"application/json"),
+                (b"content-length", str(len(body)).encode()),
+                (b"connection", b"close"),  # the body was not read
+            ],
+        })
+        await send({"type": "http.response.body", "body": body})
 
 
 class SecurityHeaders:
@@ -110,6 +156,7 @@ def create_app(
     share_names = list(dict.fromkeys(rc.share_name for rc in config.roots))
 
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+    app.add_middleware(BodyLimit)  # inside SecurityHeaders: its refusals carry the headers too
     app.add_middleware(SecurityHeaders)
     # An aborted download is reported in the audit log; the server's traceback for it is noise.
     if _drop_aborted not in logging.getLogger("uvicorn.error").filters:

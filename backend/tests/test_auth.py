@@ -228,6 +228,36 @@ def test_empty_values_never_reach_the_smb_server(make_client):
     assert calls == []
 
 
+def test_an_oversized_login_is_refused_before_it_is_read(make_client):
+    calls = []
+    client = make_client(lambda u, p, shares: calls.append(u) or set())
+    r = client.post("/api/login", content=b"x" * (16 * 1024 + 1), headers={"content-type": "application/json"})
+    assert (r.status_code, r.json()) == (413, {"error": "payload_too_large"})
+    assert r.headers["x-content-type-options"] == "nosniff" and r.headers["connection"] == "close"
+    assert calls == []
+
+
+def test_a_body_of_unknown_length_is_refused(make_client):
+    client = make_client()
+    r = client.post("/api/login", content=iter([b'{"username":"alice",', b'"password":"secret"}']))
+    assert (r.status_code, r.json()) == (411, {"error": "length_required"})
+
+
+def test_a_bad_content_length_is_refused(make_client):
+    r = make_client().post("/api/login", content=b"{}", headers={"content-length": "lots"})
+    assert r.status_code == 413
+
+
+def test_download_requests_have_a_larger_limit(make_client):
+    client = make_client()
+    assert login(client).status_code == 200
+    names = [f"{i:06d}" + "n" * 200 for i in range(10_000)]  # 2 MB: fine
+    r = client.post("/api/roots/s/downloads", json={"path": "", "names": names})
+    assert r.status_code == 404  # reached the app: nothing by those names
+    r = client.post("/api/roots/s/downloads", content=b"x" * ((8 << 20) + 1), headers={"content-type": "application/json"})
+    assert (r.status_code, r.json()) == (413, {"error": "payload_too_large"})
+
+
 def test_malformed_request_does_not_echo_the_password(make_client):
     client = make_client()
     r = client.post("/api/login", json={"password": "hunter2-secret"})
