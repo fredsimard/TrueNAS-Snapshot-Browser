@@ -35,6 +35,7 @@
   --status-changed-bg: #f0fdf4;
   --timeline-selected: #2563eb;
   --timeline-track: #e7e7ea;
+  --timeline-tick: #d97706;
 }
 
 .dark {
@@ -64,6 +65,7 @@
   --status-changed-bg: #052e16;
   --timeline-selected: #3b82f6;
   --timeline-track: #29292d;
+  --timeline-tick: #f59e0b;
 }
 
 @theme inline {
@@ -98,6 +100,7 @@
   --color-status-changed-bg: var(--status-changed-bg);
   --color-timeline-selected: var(--timeline-selected);
   --color-timeline-track: var(--timeline-track);
+  --color-timeline-tick: var(--timeline-tick);
 }
 
 @layer base {

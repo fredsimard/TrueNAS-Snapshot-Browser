@@ -38,9 +38,13 @@ export function Timeline({
   const nowIndex = points.length - 1
   const atNow = selected === nowIndex
 
-  const { xs, marks } = useMemo(() => {
-    const x = makeScale(points, now, LEFT, right)
-    return { xs: points.map((p) => x(p.time)), marks: dayMarks(points, now, x, LEFT, right) }
+  const { xs, marks, breaks } = useMemo(() => {
+    const scale = makeScale(points, now, LEFT, right)
+    return {
+      xs: points.map((p) => scale.x(p.time)),
+      marks: dayMarks(points, now, scale, LEFT, right),
+      breaks: scale.breaks,
+    }
   }, [points, now, right])
 
   const selX = atNow ? right : xs[selected]
@@ -50,17 +54,6 @@ export function Timeline({
       {/* Offset so the marks sit as far from the top edge as the labels do from the bottom. */}
       {width > 0 && (
         <div className="absolute inset-x-0 top-[5px]">
-          {marks.map((m) => (
-            <div key={m.text}>
-              <span className="absolute top-0.5 h-7 w-px bg-foreground/15" style={{ left: m.x }} />
-              <span
-                className="absolute top-[34px] text-[11.5px] whitespace-nowrap text-muted-foreground"
-                style={{ left: m.x + 4 }}
-              >
-                {m.text}
-              </span>
-            </div>
-          ))}
           <span className="absolute inset-x-0 top-[29px] h-px bg-foreground/20" />
           {!atNow && (
             <span
@@ -68,6 +61,23 @@ export function Timeline({
               style={{ left: selX, width: Math.max(0, right - selX) }}
             />
           )}
+          {/* Long stretches without versions: the track fades out and back in. */}
+          {breaks.map((b) => (
+            <span
+              key={b.from.getTime()}
+              className="absolute -top-[5px] h-[60px] bg-[linear-gradient(90deg,transparent,var(--subtle)_40%,var(--subtle)_60%,transparent)]"
+              style={{ left: b.x0, width: b.x1 - b.x0 }}
+            />
+          ))}
+          {marks.map((m) => (
+            <span
+              key={m.text}
+              className="absolute top-[34px] text-[11.5px] whitespace-nowrap text-muted-foreground"
+              style={{ left: m.x + 4 }}
+            >
+              {m.text}
+            </span>
+          ))}
           {points.slice(0, nowIndex).map((p, i) => (
             <button
               key={p.id}
@@ -82,7 +92,7 @@ export function Timeline({
             >
               <span
                 className={cn(
-                  'block w-px bg-muted-foreground/70 group-hover:bg-foreground',
+                  'block w-0.5 bg-timeline-tick group-hover:bg-foreground',
                   p.midnight ? 'h-3' : 'h-2',
                 )}
               />

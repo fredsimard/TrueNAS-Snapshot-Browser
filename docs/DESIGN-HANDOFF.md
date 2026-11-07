@@ -33,6 +33,7 @@ All data in the mockups is made up: server "Studio Server", the shares, the file
 | `--status-changed-bg` | `#f0fdf4` | `#052e16` | Changed badge background |
 | `--timeline-selected` | `#2563eb` | `#3b82f6` | selected point marker, band from selected point to Now |
 | `--timeline-track` | `#e7e7ea` | `#29292d` | panel behind the timeline, so its start and end are visible |
+| `--timeline-tick` | `#d97706` | `#f59e0b` | version ticks on the timeline: where there is a version to look at |
 
 - Unchanged rows use `--foreground` for every column (no grey columns).
 - Red is used for deleted items and for the failed sign-in Alert. Nothing else is red.
@@ -60,8 +61,9 @@ All data in the mockups is made up: server "Studio Server", the shares, the file
 
 - Available points assumed: hourly for the last 48 h, daily at 00:00 for the 14 days before that, weekly (Sunday 00:00) before that, then Now at the far right.
 - Horizontal position uses a square-root scale: `x = L + (R − L) × (1 − sqrt(ageHours / maxAgeHours))`, so recent points cluster on the right.
-- Ticks: hourly 8 px tall, daily/weekly 12 px tall, 1 px wide. Each tick has a hit area about 7 px wide.
-- Faint vertical day marks with left-aligned labels: Aug 9 … Sep 20, Sep 27, Yesterday, Today.
+- Holes collapse: a gap between versions of more than 2 days, more than 4 times the median of the 3 gaps on each side (so weekly versions stay weekly) and wider than 56 px on screen becomes a 28 px break, and its time is left out of the scale. The track fades into the section background across a break, with no label. No date label sits inside or just before a break.
+- Ticks, one per version: hourly 8 px tall, daily/weekly 12 px tall, 2 px wide, in `--timeline-tick`. Each tick has a hit area about 7 px wide.
+- Date labels, without lines, left-aligned at their day: Aug 9 … Sep 20, Sep 27, Yesterday, Today.
 - Selected point: 2 px line + 10 px dot in `--timeline-selected`, plus a light tint band from the selected point to Now.
 - Keyboard: ← / → step one point. Esc closes the menu, dialog and Sheet. Handle the keys on the Browse root element, not on `window`.
 
