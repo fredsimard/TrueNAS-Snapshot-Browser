@@ -50,7 +50,9 @@ All data in the mockups is made up: server "Studio Server", the shares, the file
   - Row 2, 12 px below: the timeline, 60 px. Its marks sit as far from the top edge as the labels from the bottom.
 - `Breadcrumb` box, 40 px, starting at the share name, above the listing.
 - Listing box: `Data Table`. Header 28 px, rows 22 px, no row borders, 13 px text.
-  - Columns: checkbox 40 · Name (flex) · Date Modified 224 · Size 96 (right-aligned) · Kind 208.
+  - Columns: checkbox 40 · status 84 · Name (flex) · dot 20 · Date Modified 208 · Size 96 (right-aligned) · Kind 208.
+  - Status column: every row has a 60 px pill, so the column reads as one: "Changed", "Deleted", or an empty outlined placeholder. Always shown, also at Now.
+  - Dot column: the dot marking a date that differs, so the dates stay aligned.
 - Item count under the listing, bottom left, 12 px below it: "34 files and 56 folders", "23 folders", "5 files", "1 file", "1 folder". It counts the rows shown, so it follows the filter. Empty while loading and when a folder state replaces the listing. When items are selected, a 36 px bar appears below the listing with "N selected" and a Download button.
 - File detail `Sheet`: 384 px box on the right, level with the breadcrumb box. It pushes the breadcrumb and listing narrower instead of overlaying them: no overlay, non-modal. It opens for files only.
 
@@ -76,9 +78,9 @@ All data in the mockups is made up: server "Studio Server", the shares, the file
 
 Each row compares the item's state at the selected point with its state now.
 
-- **Deleted:** existed then, gone now. Red row text, red row tint, solid red "Deleted" badge after the name.
-- **Changed:** a different version now. Green row text, "Changed" outline badge, and a green dot before each value that differs (Date Modified and/or Size).
-- **Unchanged:** no marker.
+- **Deleted:** existed then, gone now. Red row text, red row tint, solid red "Deleted" pill in the status column, red dot in the dot column.
+- **Changed:** a different version now. Green row text, "Changed" outline pill in the status column, a green dot in the dot column if Date Modified differs, and one before Size if the size differs.
+- **Unchanged:** an empty outlined pill, no dot.
 - **Didn't exist yet:** not listed.
 - Hover card on changed rows: a Then / Now grid for Modified and Size.
 - Hover card on deleted rows: "Not in this folder now. Last seen as of <label>."

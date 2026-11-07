@@ -10,7 +10,13 @@ import {
 import { ChevronDownIcon, ChevronUpIcon, FolderOpenIcon, HistoryIcon } from 'lucide-react'
 
 import { FileIcon } from '@/components/browse/file-icon'
-import { ChangeDot, ChangedBadge, DeletedBadge } from '@/components/browse/status-badge'
+import {
+  ChangeDot,
+  ChangedBadge,
+  DeletedBadge,
+  EmptyBadge,
+  STATUS_PILL_WIDTH,
+} from '@/components/browse/status-badge'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -24,7 +30,14 @@ import { formatSize, modifiedLabel } from '@/lib/format'
 import type { FileRow } from '@/lib/rows'
 import { cn } from '@/lib/utils'
 
-const WIDTHS: Record<string, string> = { name: '', mtime: 'w-[224px]', size: 'w-24', kind: 'w-[208px]' }
+const WIDTHS: Record<string, string> = {
+  status: 'w-[84px]',
+  name: '',
+  mark: 'w-5',
+  mtime: 'w-[208px]',
+  size: 'w-24',
+  kind: 'w-[208px]',
+}
 
 export function FileTable({
   rows,
@@ -56,6 +69,22 @@ export function FileTable({
   const columns = useMemo<ColumnDef<FileRow>[]>(
     () => [
       {
+        id: 'status',
+        header: '',
+        enableSorting: false,
+        cell: ({ row }) => (
+          <div className="flex items-center pr-2 pl-4">
+            {row.original.status === 'changed' ? (
+              <ChangedBadge className={STATUS_PILL_WIDTH} />
+            ) : row.original.status === 'deleted' ? (
+              <DeletedBadge className={STATUS_PILL_WIDTH} />
+            ) : (
+              <EmptyBadge className={STATUS_PILL_WIDTH} />
+            )}
+          </div>
+        ),
+      },
+      {
         id: 'name',
         header: 'Name',
         sortDescFirst: false,
@@ -73,8 +102,6 @@ export function FileTable({
             >
               <FileIcon kind={r.icon} />
               <span className="min-w-0 truncate">{r.name}</span>
-              {r.status === 'changed' && <ChangedBadge />}
-              {r.status === 'deleted' && <DeletedBadge />}
             </button>
           )
           if (r.status !== 'changed' && r.status !== 'deleted') return button
@@ -106,19 +133,26 @@ export function FileTable({
         },
       },
       {
-        id: 'mtime',
-        header: 'Date Modified',
-        sortDescFirst: false,
+        // The dot marking a date that differs now, or a deleted item; its own column keeps dates aligned.
+        id: 'mark',
+        header: '',
+        enableSorting: false,
         cell: ({ row }) => {
           const r = row.original
-          const diff = r.status === 'changed' && r.now !== null && r.now.mtime !== r.mtime
+          const changed = r.status === 'changed' && r.now !== null && r.now.mtime !== r.mtime
           return (
-            <div className="flex items-center gap-1.5 overflow-hidden px-2">
-              {diff && <ChangeDot />}
-              <span className="truncate">{modifiedLabel(r.mtime, now)}</span>
+            <div className="flex justify-end">
+              {changed && <ChangeDot />}
+              {r.status === 'deleted' && <ChangeDot deleted />}
             </div>
           )
         },
+      },
+      {
+        id: 'mtime',
+        header: 'Date Modified',
+        sortDescFirst: false,
+        cell: ({ row }) => <div className="truncate px-2">{modifiedLabel(row.original.mtime, now)}</div>,
       },
       {
         id: 'size',
@@ -181,21 +215,23 @@ export function FileTable({
                       <TableHead
                         key={h.id}
                         aria-sort={sorted ? (sorted === 'asc' ? 'ascending' : 'descending') : 'none'}
-                        className={cn('h-7 px-2 text-xs', WIDTHS[h.id], h.id === 'name' && 'pl-4', h.id === 'kind' && 'pl-4')}
+                        className={cn('h-7 px-2 text-xs', WIDTHS[h.id], h.id === 'kind' && 'pl-4')}
                       >
-                        <button
-                          type="button"
-                          onClick={h.column.getToggleSortingHandler()}
-                          className={cn(
-                            'flex w-full items-center gap-1 font-medium',
-                            h.id === 'size' && 'justify-end',
-                            sorted ? 'text-foreground' : 'text-muted-foreground',
-                          )}
-                        >
-                          {flexRender(h.column.columnDef.header, h.getContext())}
-                          {sorted === 'asc' && <ChevronUpIcon className="size-3" strokeWidth={2.25} />}
-                          {sorted === 'desc' && <ChevronDownIcon className="size-3" strokeWidth={2.25} />}
-                        </button>
+                        {h.column.columnDef.enableSorting !== false && (
+                          <button
+                            type="button"
+                            onClick={h.column.getToggleSortingHandler()}
+                            className={cn(
+                              'flex w-full items-center gap-1 font-medium',
+                              h.id === 'size' && 'justify-end',
+                              sorted ? 'text-foreground' : 'text-muted-foreground',
+                            )}
+                          >
+                            {flexRender(h.column.columnDef.header, h.getContext())}
+                            {sorted === 'asc' && <ChevronUpIcon className="size-3" strokeWidth={2.25} />}
+                            {sorted === 'desc' && <ChevronDownIcon className="size-3" strokeWidth={2.25} />}
+                          </button>
+                        )}
                       </TableHead>
                     )
                   })}
@@ -207,11 +243,15 @@ export function FileTable({
                 ? SKELETON.map(([w, k], i) => (
                     <TableRow key={i} className="h-[22px] border-0 hover:bg-transparent">
                       <TableCell className="py-0 pl-4">
+                        <EmptyBadge className={cn(STATUS_PILL_WIDTH, 'align-middle')} />
+                      </TableCell>
+                      <TableCell className="py-0">
                         <div className="flex items-center gap-2">
                           <Skeleton className="h-3.5 w-4" />
                           <Skeleton className="h-2.5" style={{ width: w }} />
                         </div>
                       </TableCell>
+                      <TableCell className="py-0" />
                       <TableCell className="py-0">
                         <Skeleton className="h-2.5 w-[150px]" />
                       </TableCell>
@@ -238,7 +278,7 @@ export function FileTable({
                         )}
                       >
                         {row.getVisibleCells().map((cell) => (
-                          <TableCell key={cell.id} className={cn('h-[22px] p-0', cell.column.id === 'name' && 'pl-2')}>
+                          <TableCell key={cell.id} className="h-[22px] p-0">
                             {flexRender(cell.column.columnDef.cell, cell.getContext())}
                           </TableCell>
                         ))}
