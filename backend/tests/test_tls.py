@@ -97,13 +97,12 @@ def test_a_renewed_certificate_is_noticed(tmp_path, how):
     assert tls.changed()
 
 
-def test_cookie_is_secure_under_https(ds):
+def test_cookie_is_secure_only_when_signing_in_over_https(ds):
     (ds.mountpoint / "S").mkdir()
     config = Config(server_label="N", host="h", port=0, roots=(RootConfig("s", "S", str(ds.mountpoint / "S")),),
                     snapshot_prefixes=("auto-",))
-    for secure in (True, False):
-        app = create_app(config, verify=lambda u, p, s: set(s), backend=InProcessBackend(Ops.from_config(config)),
-                         secure_cookies=secure)
-        r = TestClient(app).post("/api/login", json={"username": "a", "password": "b"})
+    app = create_app(config, verify=lambda u, p, s: set(s), backend=InProcessBackend(Ops.from_config(config)))
+    for base, secure in (("https://nas.example.test", True), ("http://nas.example.test", False)):
+        r = TestClient(app, base_url=base).post("/api/login", json={"username": "a", "password": "b"})
         cookie = r.headers["set-cookie"]
         assert cookie.startswith(f"{SESSION_COOKIE}=") and ("Secure" in cookie) == secure

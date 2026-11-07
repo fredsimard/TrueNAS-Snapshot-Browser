@@ -20,7 +20,8 @@ services:
       MAX_DOWNLOAD_GB: "20"  # largest zip one download may hold
       SNAPBACK_CONFIG: /config/snapback.yaml
     ports:
-      - "18080:8080"
+      - "18080:8080"  # HTTP
+      - "18443:8443"  # HTTPS, served only when the certificate below is mounted
     volumes:
       - type: bind
         source: /mnt/tank/apps/snapback/snapback.yaml
@@ -35,9 +36,9 @@ services:
         source: /etc/group
         target: /host/etc/group
         read_only: true
-      # Optional: the NAS's own certificate, for HTTPS. TrueNAS writes each one it holds to
-      # /etc/certificates/<name>.crt and .key; use the one for the name users type. Without these
-      # two mounts the app serves plain HTTP.
+      # Optional: the NAS's own certificate, for HTTPS on 8443 next to HTTP on 8080. TrueNAS writes
+      # each certificate it holds to /etc/certificates/<name>.crt and .key; use the one for the name
+      # users type. Without these two mounts the app serves plain HTTP only.
       - type: bind
         source: /etc/certificates/nas-example-com.crt
         target: /host/tls/tls.crt

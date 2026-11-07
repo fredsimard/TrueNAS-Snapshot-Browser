@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import signal
@@ -20,6 +21,7 @@ from .workers import SupervisedBackend, become, supervise
 
 DEFAULT_STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 WEB_UID = WEB_GID = 65534  # nobody
+HTTPS_PORT = 8443  # in the container; plain HTTP stays on the configured port
 
 
 def main() -> int:
@@ -37,7 +39,8 @@ def main() -> int:
         return 2
     static_dir = os.environ.get("SNAPBACK_STATIC_DIR") or DEFAULT_STATIC_DIR
     logging.getLogger("snapback").info(
-        "serving %s", "HTTPS with the mounted certificate" if tls.enabled else "plain HTTP: no certificate mounted"
+        "serving HTTP on %d%s", config.port,
+        f" and HTTPS on {HTTPS_PORT} with the mounted certificate" if tls.enabled else "; no certificate mounted",
     )
 
     web_end, supervisor_end = socket.socketpair()
@@ -49,15 +52,14 @@ def main() -> int:
             accounts.close()
             tls.close()  # the key is already loaded into tls.context, as root
             become(WEB_UID, WEB_GID, ())
-            app = create_app(config, static_dir, backend=SupervisedBackend(web_end), secure_cookies=tls.enabled)
-            uvicorn.run(
-                app,
-                host=config.host,
-                port=config.port,
-                server_header=False,
-                proxy_headers=False,
-                ssl_context_factory=(lambda _config, _default: tls.context) if tls.enabled else None,
-            )
+            app = create_app(config, static_dir, backend=SupervisedBackend(web_end))
+            listeners = [uvicorn.Config(app, host=config.host, port=config.port, server_header=False, proxy_headers=False)]
+            if tls.enabled:
+                listeners.append(uvicorn.Config(
+                    app, host=config.host, port=HTTPS_PORT, server_header=False, proxy_headers=False,
+                    ssl_context_factory=lambda _config, _default: tls.context,
+                ))
+            asyncio.run(serve_all(listeners))
             code = 0
         except BaseException:
             logging.getLogger("snapback").exception("web process failed")
@@ -77,6 +79,17 @@ def main() -> int:
     finally:
         stop_web(web_pid)
     return code
+
+
+async def serve_all(listeners: list[uvicorn.Config]) -> None:
+    """One app behind each listener (HTTP, and HTTPS when there's a certificate), in one process so
+    they share sessions. When one stops, the others stop too."""
+    servers = [uvicorn.Server(c) for c in listeners]
+    tasks = [asyncio.create_task(s.serve()) for s in servers]
+    await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+    for s in servers:
+        s.should_exit = True
+    await asyncio.gather(*tasks, return_exceptions=True)
 
 
 def stop_web(pid: int, grace_seconds: float = 5.0) -> None:

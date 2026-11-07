@@ -54,10 +54,11 @@ Accounts with no entry there (Active Directory, for now) can't sign in. TrueNAS 
 whenever an account or group changes; the app then exits so it restarts with the new ones, which
 signs everyone out. Set a restart policy, as in [deploy/compose.yaml](deploy/compose.yaml).
 
-HTTPS uses the NAS's own certificate, with no proxy in front: mount the pair TrueNAS writes to
-`/etc/certificates/<name>.crt` and `.key` read-only at `/host/tls/tls.crt` and `/host/tls/tls.key`.
-Without them the app serves plain HTTP, and passwords cross the network unencrypted. When TrueNAS
-renews the certificate, the app restarts to load it.
+The app always serves HTTP on port 8080. For HTTPS, with no proxy in front, mount the NAS's own
+certificate: the pair TrueNAS writes to `/etc/certificates/<name>.crt` and `.key`, read-only at
+`/host/tls/tls.crt` and `/host/tls/tls.key`. HTTPS is then served on port 8443 as well, and HTTP keeps
+working. Over HTTP, passwords cross the network unencrypted. When TrueNAS renews the certificate, the
+app restarts to load it.
 
 Point in time for each snapshot comes from the timestamp in its name (TrueNAS `auto-%Y-%m-%d_%H-%M`,
 zfs-auto-snapshot and sanoid formats). Names without one fall back to the directory's mtime.

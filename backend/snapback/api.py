@@ -92,7 +92,6 @@ def create_app(
     verify: SignIn | None = None,
     *,
     backend: Backend,
-    secure_cookies: bool = False,  # served over HTTPS: the browser never sends the cookie over HTTP
 ) -> FastAPI:
     verify = verify or partial(smb_sign_in, config.smb_host)
     sessions = SessionStore()
@@ -204,13 +203,16 @@ def create_app(
         visible = frozenset(rc.id for rc in config.roots if rc.share_name in shares)
         log.info("signed in: %r from %s, roots: %s", username, address, ", ".join(sorted(visible)) or "none")
         token = sessions.create(username, visible, workers)
-        response.set_cookie(SESSION_COOKIE, token, httponly=True, samesite="strict", path="/", secure=secure_cookies)
+        # Secure when signing in over HTTPS, so the browser never sends it over plain HTTP.
+        secure = request.url.scheme == "https"
+        response.set_cookie(SESSION_COOKIE, token, httponly=True, samesite="strict", path="/", secure=secure)
         return {"user": username}
 
     @app.post("/api/logout")
     def logout(request: Request, response: Response) -> dict:
         sessions.delete(request.cookies.get(SESSION_COOKIE))
-        response.delete_cookie(SESSION_COOKIE, httponly=True, samesite="strict", path="/", secure=secure_cookies)
+        secure = request.url.scheme == "https"
+        response.delete_cookie(SESSION_COOKIE, httponly=True, samesite="strict", path="/", secure=secure)
         return {}
 
     @app.get("/api/roots/{root_id}/points")
