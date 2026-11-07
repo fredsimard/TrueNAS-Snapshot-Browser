@@ -3,7 +3,7 @@
 # can't set the mount propagation the snapshots need (rslave, below).
 services:
   snapback:
-    image: ghcr.io/fredsimard/snapback:1.0.0
+    image: ghcr.io/fredsimard/snapshots-browser:1.0.0
     restart: unless-stopped  # the app restarts itself when accounts or the certificate change
     environment:
       SERVER_NAME: "Studio Server"  # ← the name users know this server by, shown at the top
