@@ -6,7 +6,14 @@ from fastapi.testclient import TestClient
 
 from snapback import auth
 from snapback.api import SESSION_COOKIE, create_app
-from snapback.auth import AuthUnavailable, LoginThrottle, SessionStore, account_key, smb_sign_in
+from snapback.auth import (
+    MAX_SESSIONS_PER_USER,
+    AuthUnavailable,
+    LoginThrottle,
+    SessionStore,
+    account_key,
+    smb_sign_in,
+)
 from snapback.config import Config, RootConfig
 from snapback.ops import Ops
 from snapback.workers import InProcessBackend, WorkerUnavailable
@@ -309,6 +316,54 @@ def test_session_expires_when_idle_and_slides_with_use():
     t[0] = 281
     assert store.get(token) is None
     assert store.get(None) is None
+
+
+class Workers:
+    def __init__(self):
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+
+def test_an_account_keeps_a_limited_number_of_sessions():
+    t = [0.0]
+    store = SessionStore(idle_seconds=1000, clock=lambda: t[0])
+    ours, tokens = [], []
+    bob = Workers()
+    store.make_room("bob")
+    store.create("bob", {"s"}, bob)
+    for i in range(MAX_SESSIONS_PER_USER):
+        t[0] = i
+        store.make_room("alice")
+        ours.append(Workers())
+        tokens.append(store.create("alice", {"s"}, ours[-1]))
+    assert not any(w.closed for w in ours)
+    t[0] = 10
+    assert store.get(tokens[0]) is not None  # used just now: no longer the least recently used
+    store.make_room("Alice")  # same account, spelled differently
+    ours.append(Workers())
+    tokens.append(store.create("Alice", {"s"}, ours[-1]))
+    assert [w.closed for w in ours] == [False, True, False, False, False]  # the least recently used went
+    assert store.get(tokens[1]) is None and not bob.closed
+
+
+def test_making_room_ends_expired_sessions_before_a_worker_is_started():
+    t = [0.0]
+    store = SessionStore(idle_seconds=100, clock=lambda: t[0])
+    gone = Workers()
+    store.create("bob", {"s"}, gone)
+    t[0] = 150
+    store.make_room("alice")
+    assert gone.closed
+
+
+def test_signing_in_again_and_again_replaces_the_oldest_sessions(make_client):
+    first = make_client()
+    clients = [first] + [TestClient(first.app) for _ in range(MAX_SESSIONS_PER_USER)]
+    for c in clients:
+        assert login(c).status_code == 200
+    assert [c.get("/api/info").json()["user"] for c in clients] == [None] + ["alice"] * MAX_SESSIONS_PER_USER
 
 
 def test_throttle_forgets_after_the_window():

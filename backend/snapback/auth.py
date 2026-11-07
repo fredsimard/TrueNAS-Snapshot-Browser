@@ -46,6 +46,7 @@ SESSION_IDLE_SECONDS = 3600
 THROTTLE_WINDOW_SECONDS = 300
 MAX_FAILURES_PER_USER = 5  # below typical AD lockout thresholds, so typos can't lock an account
 MAX_FAILURES_PER_ADDRESS = 20
+MAX_SESSIONS_PER_USER = 4  # each holds up to 3 workers, and the supervisor allows 64 in all
 
 
 class AuthUnavailable(Exception):
@@ -142,6 +143,18 @@ class SessionStore:
             self._sessions[token] = UserSession(username, frozenset(roots), now + self._idle, workers)
         _end(ended)
         return token
+
+    def make_room(self, username: str, limit: int = MAX_SESSIONS_PER_USER) -> None:
+        """Before a new session for username: end the sessions that have expired, and the account's least
+        recently used ones until it has fewer than limit. One account can't then fill the supervisor's
+        workers, or leave new sign-ins refused because expired sessions still hold theirs."""
+        key = account_key(username)
+        with self._lock:
+            ended = self._prune(self._clock())
+            mine = sorted((s.expires, t) for t, s in self._sessions.items() if account_key(s.username) == key)
+            for _, token in mine[: max(0, len(mine) - limit + 1)]:
+                ended.append(self._sessions.pop(token))
+        _end(ended)
 
     def get(self, token: str | None) -> UserSession | None:
         now = self._clock()

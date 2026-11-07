@@ -258,6 +258,7 @@ def create_app(
         if not allowed:
             log.warning("sign-in refused for %r from %s: not in ALLOWED_USERS", username, address)
             raise HTTPException(403, "not_allowed")
+        sessions.make_room(username)  # before the worker is started, so there is room for it
         try:
             workers = backend.start(username)
         except WorkerUnavailable as e:
