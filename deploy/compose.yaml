@@ -5,6 +5,9 @@ services:
     # Loaded on the NAS with `docker load`; never pulled from a registry.
     image: snapback:dev
     pull_policy: never
+    # The app exits when TrueNAS replaces the host's account files (any account or group change),
+    # so it has to come back up to read the new ones.
+    restart: unless-stopped
     environment:
       # Required. Comma-separated snapshot name prefixes users may see.
       SNAPSHOT_PREFIXES: "auto-"
@@ -21,6 +24,15 @@ services:
       - type: bind
         source: /mnt/tank/apps/snapback/snapback.yaml
         target: /config/snapback.yaml
+        read_only: true
+      # The host's accounts: the app reads files as the signed-in user's uid and groups.
+      - type: bind
+        source: /etc/passwd
+        target: /host/etc/passwd
+        read_only: true
+      - type: bind
+        source: /etc/group
+        target: /host/etc/group
         read_only: true
       # One per distinct dataset mountpoint, same path inside and outside, read-only.
       - type: bind

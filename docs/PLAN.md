@@ -120,6 +120,7 @@ Requirements this imposes:
 
 - The web layer runs unprivileged; only a small supervisor holds `CAP_SETUID`/`CAP_SETGID` to fork workers.
 - Identity resolution must produce the *same* uid/gid the host assigns. Trivial for local users. For AD, the uid comes from winbind's idmap and the container must agree with the host — see risk 4.
+- Identity for local accounts comes from the host's `/etc/passwd` and `/etc/group`, mounted read-only. TrueNAS replaces both files on any account or group change, and a bind-mounted file keeps showing the old one, so the app exits when that happens and the container restarts.
 - Snapshots preserve the ACLs in force when the snapshot was taken. A user who has since lost access to a folder may still be able to read older copies of it, and vice versa. This is inherent to ZFS snapshots and should be stated in the UI, not worked around.
 
 ## 9. Restore behaviour
@@ -149,7 +150,7 @@ Single container, custom app in TrueNAS Apps. Host path mounts, read-only, one p
 Ordered by how much damage they do if they turn out badly.
 
 1. **Snapshot automount propagation into the container.** ZFS automounts each snapshot on first access to its directory. Docker bind mounts default to `private` propagation, so mounts appearing on the host *after* container start may not be visible inside it — the container could see snapshot directories that are empty. Mitigations, in order of preference: set `rshared`/`rslave` propagation on the bind mount; or run the filesystem-access component on the host and keep only the web layer containerised. **Resolved: `rslave` works and is required; without it snapshots list as empty with no error.**
-2. **TrueNAS Apps custom-app capabilities.** Whether the custom app YAML permits mount propagation settings, host path mounts at pool level, and the capabilities needed for privilege dropping. Resolved for propagation: "Install via YAML" accepts it, the Custom App wizard has no such setting. Capabilities for privilege dropping are still to be confirmed in Phase 4.
+2. **TrueNAS Apps custom-app capabilities.** Whether the custom app YAML permits mount propagation settings, host path mounts at pool level, and the capabilities needed for privilege dropping. Resolved for propagation: "Install via YAML" accepts it, the Custom App wizard has no such setting. Privilege dropping works with Docker's default capabilities, in a `docker run` container (`spike/drop.py`) and in the app. "Install via YAML" accepts read-only mounts of `/etc/passwd` and `/etc/group`, and `restart: unless-stopped` brings the app back after an account change.
 3. **SMB authentication from the container.** Resolved: a session to the NAS's network address accepts real logins and refuses wrong passwords and unknown users, without falling back to guest.
 4. **AD uid consistency.** The container must resolve AD users to the same uids winbind assigns on the host, or ACL enforcement silently checks against the wrong identity. Options: join the container to the domain with identical idmap config, or query the host for the mapping. Affects only the AD servers.
 5. **Scale of enumeration.** Hundreds of snapshots against deep trees. Enumerate lazily, one directory at a time, never walk a whole snapshot. Cache snapshot *lists* briefly; never cache directory contents across users.

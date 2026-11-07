@@ -11,19 +11,20 @@ their share by folder and by time, and see what changed or was deleted. Plan and
 | 0: automount spike | Passed on TrueNAS: [spike/README.md](spike/README.md) |
 | 1–2: read-only browser, config, multi-root | Done, checked on real snapshots |
 | 3: sign-in | Done, checked on TrueNAS |
-| 4: per-user permissions | In progress: users see only the shares Samba lets them connect to, and `ALLOWED_USERS` limits who can sign in. Folder permissions inside a share aren't applied yet. |
+| 4: per-user permissions | Done, checked on TrueNAS: users see only the shares Samba lets them connect to, `ALLOWED_USERS` limits who can sign in, and every file access runs as the signed-in account, so folder permissions apply. |
 | 5–7: downloads, AD, packaging | Not started |
 
-**Not ready for staff yet.** Inside a share, every signed-in user sees everything under the mounted
-datasets, because the app runs as root in the container; Phase 4's privilege-dropping workers fix that.
-The app also serves plain HTTP, so passwords cross the LAN unencrypted.
+**Not ready for staff yet.** The app serves plain HTTP, so passwords cross the LAN unencrypted.
+
+Snapshots keep the permissions they had when they were taken: someone who has since lost access to a
+folder can still open its older copies, and the reverse.
 
 ## Layout
 
 ```
 backend/    FastAPI app (Python ≥ 3.10), tests, demo data generator
 frontend/   React + Vite + Tailwind v4 + shadcn/ui (new-york, zinc)
-spike/      Phase 0 check
+spike/      Checks run on a real NAS before building on them
 deploy/     Example TrueNAS compose file and server config
 docs/       Plan and design
 ```
@@ -45,6 +46,13 @@ folder; the dataset mountpoint is detected by walking up to the nearest `.zfs/sn
 distinct dataset mountpoint read-only at the same path inside the container. At sign-in, the app
 connects to each root's SMB share with the user's own credentials and shows only the roots Samba
 lets that account use.
+
+Mount the host's `/etc/passwd` and `/etc/group` read-only at `/host/etc/passwd` and `/host/etc/group`.
+The app starts as root, looks each signed-in account up there, and reads files only in worker
+processes running as that account's uid and groups, so the kernel applies the share's permissions.
+Accounts with no entry there (Active Directory, for now) can't sign in. TrueNAS replaces both files
+whenever an account or group changes; the app then exits so it restarts with the new ones, which
+signs everyone out. Set a restart policy, as in [deploy/compose.yaml](deploy/compose.yaml).
 
 Point in time for each snapshot comes from the timestamp in its name (TrueNAS `auto-%Y-%m-%d_%H-%M`,
 zfs-auto-snapshot and sanoid formats). Names without one fall back to the directory's mtime.

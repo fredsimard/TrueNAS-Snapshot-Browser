@@ -84,7 +84,12 @@ class SnapshotIndex:
 
     def _enumerate(self, snapshot_dir: str) -> tuple[Snapshot, ...]:
         found: list[Snapshot] = []
-        for name in os.listdir(snapshot_dir):
+        try:
+            names = os.listdir(snapshot_dir)
+        except PermissionError:
+            # This account can't reach the dataset, so it can't read any snapshot of it either.
+            return ()
+        for name in names:
             if not name.startswith(self._prefixes) or name.startswith(".") or not is_valid_name(name):
                 continue
             t = time_from_name(name, self._tz)

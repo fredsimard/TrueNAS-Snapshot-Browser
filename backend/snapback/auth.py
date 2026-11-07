@@ -22,6 +22,7 @@ import time
 import uuid
 from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass
+from typing import Protocol
 
 from smbprotocol.connection import Connection
 from smbprotocol.exceptions import BadNetworkName, SMBConnectionClosed, SMBException
@@ -103,48 +104,74 @@ def _can_use(session: Session, host: str, share: str, username: str) -> bool:
     return True
 
 
+class Closable(Protocol):
+    def close(self) -> None: ...
+
+
 @dataclass
 class UserSession:
     username: str
     roots: frozenset[str]  # ids of the roots this user may browse
     expires: float
+    workers: Closable | None = None  # reads files as this account (workers.Runner)
 
 
 class SessionStore:
-    """In-memory sessions: a restart signs everyone out. Expiry slides with each request."""
+    """In-memory sessions: a restart signs everyone out. Expiry slides with each request.
+
+    A session's workers are closed when it ends: at sign-out, or the first time the store notices
+    it has expired, which is at most PRUNE_SECONDS after it did while the app is in use.
+    """
+
+    PRUNE_SECONDS = 60.0
 
     def __init__(self, idle_seconds: float = SESSION_IDLE_SECONDS, clock=time.monotonic):
         self._idle = idle_seconds
         self._clock = clock
         self._lock = threading.Lock()
         self._sessions: dict[str, UserSession] = {}
+        self._next_prune = 0.0
 
-    def create(self, username: str, roots: Collection[str]) -> str:
+    def create(self, username: str, roots: Collection[str], workers: Closable | None = None) -> str:
         token = secrets.token_urlsafe(32)
         now = self._clock()
         with self._lock:
-            self._sessions = {t: s for t, s in self._sessions.items() if s.expires > now}
-            self._sessions[token] = UserSession(username, frozenset(roots), now + self._idle)
+            ended = self._prune(now)
+            self._sessions[token] = UserSession(username, frozenset(roots), now + self._idle, workers)
+        _end(ended)
         return token
 
     def get(self, token: str | None) -> UserSession | None:
-        if not token:
-            return None
         now = self._clock()
+        found = None
         with self._lock:
-            s = self._sessions.get(token)
-            if s is None:
-                return None
-            if s.expires <= now:
-                del self._sessions[token]
-                return None
-            s.expires = now + self._idle
-            return s
+            ended = self._prune(now) if now >= self._next_prune else []
+            s = self._sessions.get(token) if token else None
+            if s is not None and s.expires <= now:
+                ended.append(self._sessions.pop(token))
+            elif s is not None:
+                s.expires = now + self._idle
+                found = s
+        _end(ended)
+        return found
 
     def delete(self, token: str | None) -> None:
-        if token:
-            with self._lock:
-                self._sessions.pop(token, None)
+        if not token:
+            return
+        with self._lock:
+            s = self._sessions.pop(token, None)
+        _end([s] if s else [])
+
+    def _prune(self, now: float) -> list[UserSession]:
+        self._next_prune = now + self.PRUNE_SECONDS
+        ended = [t for t, s in self._sessions.items() if s.expires <= now]
+        return [self._sessions.pop(t) for t in ended]
+
+
+def _end(sessions: list[UserSession]) -> None:
+    for s in sessions:
+        if s.workers is not None:
+            s.workers.close()
 
 
 class LoginThrottle:

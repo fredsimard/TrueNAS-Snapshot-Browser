@@ -15,6 +15,8 @@ import uvicorn
 
 from snapback.api import create_app
 from snapback.config import load_config
+from snapback.ops import Ops
+from snapback.workers import InProcessBackend
 
 
 def main() -> None:
@@ -24,7 +26,8 @@ def main() -> None:
     def sign_in(username: str, password: str, shares: list[str]) -> set[str] | None:
         return set(shares) if (username, password) == ("demo", "demo") else None
 
-    app = create_app(config, verify=sign_in)
+    # Reads files as whoever runs this script: no privilege drop.
+    app = create_app(config, verify=sign_in, backend=InProcessBackend(Ops.from_config(config)))
     uvicorn.run(app, host=config.host, port=config.port)
 
 

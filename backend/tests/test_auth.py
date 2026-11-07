@@ -5,6 +5,8 @@ from snapback import auth
 from snapback.api import SESSION_COOKIE, create_app
 from snapback.auth import AuthUnavailable, LoginThrottle, SessionStore, smb_sign_in
 from snapback.config import Config, RootConfig
+from snapback.ops import Ops
+from snapback.workers import InProcessBackend, WorkerUnavailable
 from smbprotocol.exceptions import AccessDenied, BadNetworkName, SMBConnectionClosed, SMBException
 
 
@@ -28,8 +30,10 @@ def make_client(ds):
         snapshot_prefixes=("auto-",),
     )
 
-    def make(verify=alice, **overrides):
-        return TestClient(create_app(Config(**{**base.__dict__, **overrides}), verify=verify))
+    def make(verify=alice, accounts=None, backend=None, **overrides):
+        config = Config(**{**base.__dict__, **overrides})
+        backend = backend or InProcessBackend(Ops.from_config(config), accounts)
+        return TestClient(create_app(config, verify=verify, backend=backend))
 
     return make
 
@@ -125,6 +129,84 @@ def test_sign_out(make_client):
     assert client.get("/api/roots/s/folder").status_code == 401
     client.cookies.set(SESSION_COOKIE, token)  # the old token is dead on the server too
     assert client.get("/api/roots/s/folder").status_code == 401
+
+
+class SpyBackend:
+    """Records each session's runner; `fail` makes requests fail as if the worker died."""
+
+    def __init__(self, fail_start=False, fail_calls=False):
+        self.runners = []
+        self.fail_start = fail_start
+        self.fail_calls = fail_calls
+
+    def start(self, username):
+        if self.fail_start:
+            raise WorkerUnavailable("supervisor: busy")
+        runner = SpyRunner(self)
+        self.runners.append(runner)
+        return runner
+
+
+class SpyRunner:
+    def __init__(self, backend):
+        self.backend = backend
+        self.closed = False
+
+    def call(self, req):
+        if self.backend.fail_calls:
+            raise WorkerUnavailable("worker: TimeoutError")
+        return {"ok": {"points": []}}
+
+    def close(self):
+        self.closed = True
+
+
+def test_account_unknown_to_the_host_is_refused(make_client):
+    client = make_client(accounts={"bob"})
+    r = login(client)
+    assert (r.status_code, r.json()) == (403, {"error": "not_allowed"})
+    assert SESSION_COOKIE not in client.cookies
+
+
+def test_sign_out_ends_the_sessions_workers(make_client):
+    backend = SpyBackend()
+    client = make_client(backend=backend)
+    login(client)
+    assert client.get("/api/roots/s/points").json() == {"points": []}
+    assert not backend.runners[0].closed
+    client.post("/api/logout")
+    assert backend.runners[0].closed
+
+
+def test_supervisor_unavailable_at_sign_in(make_client):
+    r = login(make_client(backend=SpyBackend(fail_start=True)))
+    assert (r.status_code, r.json()) == (503, {"error": "auth_unavailable"})
+
+
+def test_worker_unavailable(make_client):
+    client = make_client(backend=SpyBackend(fail_calls=True))
+    login(client)
+    r = client.get("/api/roots/s/points")
+    assert (r.status_code, r.json()) == (503, {"error": "unavailable"})
+
+
+def test_requests_for_a_root_the_session_cant_use_never_reach_a_worker(make_client):
+    backend = SpyBackend(fail_calls=True)
+    client = make_client(lambda u, p, shares: {"S"}, backend=backend)
+    login(client)
+    assert client.get("/api/roots/t/points").status_code == 404
+    assert client.get("/api/roots/nope/points").status_code == 404
+
+
+def test_expired_sessions_end_their_workers():
+    t = [0.0]
+    store = SessionStore(idle_seconds=100, clock=lambda: t[0])
+    a, b = SpyRunner(None), SpyRunner(None)
+    token = store.create("alice", {"s"}, a)
+    store.create("bob", {"s"}, b)
+    t[0] = 150
+    assert store.get(token) is None
+    assert a.closed and b.closed  # bob's too, without bob coming back
 
 
 @pytest.mark.parametrize("username,password", [("alice", "wrong"), ("bob", "secret"), ("", "secret"), ("  ", "x"), ("alice", "")])

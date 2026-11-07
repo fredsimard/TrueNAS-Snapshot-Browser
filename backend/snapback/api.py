@@ -3,7 +3,8 @@
 Clients address content as root id + relative path + opaque point id. No absolute path,
 snapshot name or OS error text is ever sent to the client. Everything except sign-in and the
 server's name requires a session, and each session sees only the roots whose SMB share the
-account could connect to at sign-in.
+account could connect to at sign-in. Every file access goes to the session's workers, which run as
+the signed-in account (workers.py); this process never reads a share.
 """
 
 from __future__ import annotations
@@ -29,10 +30,9 @@ from .auth import (
     UserSession,
     smb_sign_in,
 )
-from .browse import FolderResult, History, Row, Timeline, file_history, list_folder
 from .config import Config
-from .paths import Entry, PathRejected, Root, parse_rel, resolve_root
-from .snapshots import SnapshotIndex
+from .ops import ERROR_STATUS
+from .workers import Backend, WorkerUnavailable
 
 log = logging.getLogger(__name__)
 
@@ -48,25 +48,15 @@ def create_app(
     config: Config,
     static_dir: str | None = None,
     verify: SignIn | None = None,
+    *,
+    backend: Backend,
 ) -> FastAPI:
     verify = verify or partial(smb_sign_in, config.smb_host)
     sessions = SessionStore()
     user_throttle = LoginThrottle(MAX_FAILURES_PER_USER)
     address_throttle = LoginThrottle(MAX_FAILURES_PER_ADDRESS)
-    roots: dict[str, Root] = {rc.id: resolve_root(rc) for rc in config.roots}
+    roots = {rc.id: rc for rc in config.roots}
     share_names = list(dict.fromkeys(rc.share_name for rc in config.roots))
-    index = SnapshotIndex(
-        prefixes=config.snapshot_prefixes,
-        max_listed=config.max_snapshots_listed,
-        ttl_seconds=config.snapshot_cache_seconds,
-        tz=config.timezone,
-    )
-    for r in roots.values():
-        log.info(
-            "root %s: share_root=%s dataset_mountpoint=%s relative_prefix=%s snapshots=%d",
-            r.id, r.share_root, r.dataset_mountpoint, "/".join(r.relative_prefix) or ".",
-            len(index.list(r.snapshot_dir)),
-        )
 
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 
@@ -100,27 +90,19 @@ def create_app(
             raise HTTPException(401, "not_signed_in")
         return session
 
-    def get_root(root_id: str, session: UserSession = Depends(signed_in)) -> Root:
+    def run(root_id: str, session: UserSession, **req: str) -> dict:
         # A root the user may not browse is indistinguishable from one that doesn't exist.
-        root = roots.get(root_id)
-        if root is None or root_id not in session.roots:
+        if root_id not in roots or root_id not in session.roots:
             raise HTTPException(404, "unknown_root")
-        return root
-
-    def get_parts(path: str) -> tuple[str, ...]:
         try:
-            return parse_rel(path)
-        except PathRejected:
-            raise HTTPException(400, "bad_path") from None
-
-    def timeline(root: Root) -> Timeline:
-        return Timeline(root, index.list(root.snapshot_dir))
-
-    def point_index(tl: Timeline, at: str) -> int:
-        i = tl.index_of(at)
-        if i is None:
-            raise HTTPException(404, "unknown_point")
-        return i
+            reply = session.workers.call({**req, "root": root_id})
+        except WorkerUnavailable as e:
+            log.error("request from %r failed: %s", session.username, e)
+            raise HTTPException(503, "unavailable") from None
+        if "error" in reply:
+            code = str(reply["error"])
+            raise HTTPException(ERROR_STATUS.get(code, 500), code if code in ERROR_STATUS else "internal")
+        return reply["ok"]
 
     @app.get("/api/info")
     def info(request: Request) -> dict:
@@ -158,9 +140,17 @@ def create_app(
         if not allowed:
             log.warning("sign-in refused for %r from %s: not in ALLOWED_USERS", username, address)
             raise HTTPException(403, "not_allowed")
+        try:
+            workers = backend.start(username)
+        except WorkerUnavailable as e:
+            log.error("sign-in unavailable for %r: %s", username, e)
+            raise HTTPException(503, "auth_unavailable") from None
+        if workers is None:
+            log.warning("sign-in refused for %r from %s: no such account on this server", username, address)
+            raise HTTPException(403, "not_allowed")
         visible = frozenset(rc.id for rc in config.roots if rc.share_name in shares)
         log.info("signed in: %r from %s, roots: %s", username, address, ", ".join(sorted(visible)) or "none")
-        token = sessions.create(username, visible)
+        token = sessions.create(username, visible, workers)
         response.set_cookie(SESSION_COOKIE, token, httponly=True, samesite="strict", path="/")
         return {"user": username}
 
@@ -171,64 +161,21 @@ def create_app(
         return {}
 
     @app.get("/api/roots/{root_id}/points")
-    def points(root: Root = Depends(get_root)) -> dict:
-        tl = timeline(root)
-        return {"points": [{"id": s.id, "time": s.time.isoformat()} for s in tl.snapshots]}
+    def points(root_id: str, session: UserSession = Depends(signed_in)) -> dict:
+        return run(root_id, session, op="points")
 
     @app.get("/api/roots/{root_id}/folder")
-    def folder(root: Root = Depends(get_root), path: str = "", at: str = "now") -> dict:
-        parts = get_parts(path)
-        tl = timeline(root)
-        return folder_json(tl, list_folder(tl, parts, point_index(tl, at)))
+    def folder(root_id: str, path: str = "", at: str = "now", session: UserSession = Depends(signed_in)) -> dict:
+        return run(root_id, session, op="folder", path=path, at=at)
 
     @app.get("/api/roots/{root_id}/history")
-    def history(path: str, root: Root = Depends(get_root)) -> dict:
-        parts = get_parts(path)
-        if not parts:
-            raise HTTPException(400, "bad_path")
-        tl = timeline(root)
-        return history_json(tl, file_history(tl, parts))
+    def history(root_id: str, path: str, session: UserSession = Depends(signed_in)) -> dict:
+        return run(root_id, session, op="history", path=path)
 
     if static_dir and os.path.isfile(os.path.join(static_dir, "index.html")):
         mount_frontend(app, static_dir)
 
     return app
-
-
-def entry_json(e: Entry) -> dict:
-    return {"dir": e.is_dir, "size": e.size, "mtime": e.mtime_ns // 1_000_000}
-
-
-def row_json(tl: Timeline, r: Row) -> dict:
-    return {
-        "name": r.entry.name,
-        **entry_json(r.entry),
-        "status": r.status,
-        "now": entry_json(r.now) if r.now is not None else None,
-        "last_seen": tl.point_id(r.last_seen) if r.last_seen is not None else None,
-    }
-
-
-def folder_json(tl: Timeline, res: FolderResult) -> dict:
-    return {
-        "state": res.state,
-        "entries": [row_json(tl, r) for r in res.rows],
-        "nearest": (
-            {"at": tl.point_id(res.nearest), "direction": res.direction}
-            if res.nearest is not None
-            else None
-        ),
-    }
-
-
-def history_json(tl: Timeline, h: History) -> dict:
-    return {
-        "now": entry_json(h.now) if h.now is not None else None,
-        "versions": [
-            {**entry_json(v.entry), "current": v.current, "points": [tl.point_id(i) for i in v.points]}
-            for v in h.versions
-        ],
-    }
 
 
 def mount_frontend(app: FastAPI, static_dir: str) -> None:

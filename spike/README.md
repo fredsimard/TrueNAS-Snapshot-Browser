@@ -45,3 +45,26 @@ It signs in, connects to the share and opens its top folder for listing. Nothing
 - An account removed from `builtin_users` is denied, but only at its top folder. Samba accepts the share
   connection, then refuses every request on it, including the disconnect. Connecting alone proves nothing.
 - An empty password is refused.
+
+## `drop.py`: permissions for a process that has become the user (Phase 4)
+
+```bash
+docker run --rm -it --mount type=bind,source=/etc/passwd,target=/host/passwd,readonly --mount type=bind,source=/etc/group,target=/host/group,readonly --mount type=bind,source=/mnt/POOL/DATASET,target=/mnt/POOL/DATASET,readonly,bind-propagation=rslave --mount type=bind,source=/path/to/drop.py,target=/drop.py,readonly python:3.12-slim python3 /drop.py /mnt/POOL/DATASET/SHARE
+```
+
+It reads the account's uid and groups from the host's files, then lists the share's top folder and the folders
+in it, live and in the newest snapshot, as that user and as root. No password; nothing is written.
+
+**Result:**
+
+- A container with Docker's default capabilities can drop to the user's uid and groups, and `setuid(0)` is
+  refused afterwards.
+- An account with access sees the same folders as root, live and in the snapshot.
+- An account outside the share's groups is denied at the top folder, live and in the snapshot. The kernel
+  enforces the share's permissions; the app doesn't have to evaluate them.
+- Deleting an account replaced `/etc/passwd` and `/etc/group` with new files (new inode numbers). A bind mount
+  of either file keeps showing the old copy until the container restarts.
+
+**In the app (Install via YAML, TrueNAS 25.10.8):** the supervisor runs as root, the web process as `nobody`,
+and each worker as the signed-in account with its groups. Creating an account, then changing its groups, made
+the app exit each time; the restart policy brought it back with the new accounts.

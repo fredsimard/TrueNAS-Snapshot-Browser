@@ -3,6 +3,8 @@ from fastapi.testclient import TestClient
 
 from snapback.api import create_app
 from snapback.config import Config, RootConfig
+from snapback.ops import Ops
+from snapback.workers import InProcessBackend
 
 SNAPS = ["auto-2026-09-20_00-00", "auto-2026-09-21_00-00"]
 
@@ -26,7 +28,8 @@ def setup(ds, tmp_path):
     (static / "assets").mkdir(parents=True)
     (static / "index.html").write_text("<!doctype html><title>app</title>")
     (static / "assets" / "app.js").write_text("console.log(1)")
-    client = TestClient(create_app(config, str(static), verify=lambda u, p, shares: set(shares)))
+    backend = InProcessBackend(Ops.from_config(config))
+    client = TestClient(create_app(config, str(static), verify=lambda u, p, shares: set(shares), backend=backend))
     assert client.post("/api/login", json={"username": "alice", "password": "pw"}).status_code == 200
     return client, str(tmp_path)
 
