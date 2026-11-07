@@ -96,11 +96,10 @@ export function TimeBar({
           </TooltipContent>
         </Tooltip>
         {points.length > 1 && <DatePicker points={points} selected={selected} onPick={onPickDate} />}
-        {!atNow && (
-          <Button size="sm" className="h-7 px-3 text-[12.5px]" onClick={() => onSelect(nowIndex)}>
-            Back to Now
-          </Button>
-        )}
+        {/* Always there, so the buttons beside it don't move when leaving Now. */}
+        <Button size="sm" className="h-7 px-3 text-[12.5px]" disabled={atNow} onClick={() => onSelect(nowIndex)}>
+          Back to Now
+        </Button>
       </div>
       <Timeline points={points} selected={selected} now={now} onSelect={onSelect} />
     </section>

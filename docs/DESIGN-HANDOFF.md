@@ -47,7 +47,7 @@ All data in the mockups is made up: server "Studio Server", the shares, the file
   - Filter `ToggleGroup`: All / Changed / Deleted, each with its count. Hidden at Now.
   - Step ← → buttons with a `Tooltip` holding `Kbd` ← →.
   - "Pick a date" (`Popover` + `Calendar`).
-  - "Back to Now" (primary button, hidden at Now).
+  - "Back to Now" (primary button, disabled and dimmed at Now; always there so the buttons beside it don't move).
   - Row 2, 12 px below: the timeline, 60 px. Its marks sit as far from the top edge as the labels from the bottom.
 - `Breadcrumb` box, 40 px, starting at the share name, above the listing.
 - Listing box: `Data Table`. Header 28 px, rows 22 px, no row borders, 13 px text.
