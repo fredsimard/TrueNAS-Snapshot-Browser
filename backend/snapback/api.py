@@ -65,6 +65,24 @@ class DownloadRequest(BaseModel):
     names: list[str] = Field(min_length=1, max_length=MAX_NAMES)
 
 
+# The page is one bundle, one stylesheet and its fonts, all served from here. Styles stay open to
+# inline ones: React sets style attributes and the toast library adds a <style> element. No inline
+# scripts (the theme script is a file), no framing, no plugins, and requests go nowhere else.
+CONTENT_SECURITY_POLICY = "; ".join([
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data:",
+    "font-src 'self' data:",
+    "connect-src 'self'",
+    "object-src 'none'",
+    "base-uri 'none'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+])
+PERMISSIONS_POLICY = "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+
+
 class BodyLimit:
     """Plain ASGI middleware: refuses a request whose body is over the limit before any of it is read.
 
@@ -126,6 +144,8 @@ class SecurityHeaders:
                 h["X-Content-Type-Options"] = "nosniff"
                 h["Referrer-Policy"] = "no-referrer"
                 h["X-Frame-Options"] = "DENY"
+                h["Content-Security-Policy"] = CONTENT_SECURITY_POLICY
+                h["Permissions-Policy"] = PERMISSIONS_POLICY
                 if api:
                     h["Cache-Control"] = "no-store"
             await send(message)
