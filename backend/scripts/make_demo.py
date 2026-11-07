@@ -96,6 +96,10 @@ def state_at(its: list[dict], t: datetime) -> dict[str, tuple[dict, int]]:
     return out
 
 
+def is_demo_folder(path: Path) -> bool:
+    return (path / "snapback.env").is_file() and (path / "mnt").is_dir() and (path / "blobs").is_dir()
+
+
 def unlock(path: Path) -> None:
     for dirpath, dirnames, _ in os.walk(path):
         for d in dirnames:
@@ -107,6 +111,10 @@ def unlock(path: Path) -> None:
 def main() -> int:
     out = Path(sys.argv[1] if len(sys.argv) > 1 else "../dev/demo").resolve()
     if out.exists():
+        # It is wiped and rebuilt, so only a folder this script made (or an empty one) qualifies.
+        if not out.is_dir() or (any(out.iterdir()) and not is_demo_folder(out)):
+            print(f"{out} exists and isn't a demo folder made by this script; not touching it.", file=sys.stderr)
+            return 2
         out.chmod(0o755)
         unlock(out)
         shutil.rmtree(out)
