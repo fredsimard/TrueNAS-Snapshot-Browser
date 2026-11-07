@@ -1,9 +1,12 @@
+import threading
+import time
+
 import pytest
 from fastapi.testclient import TestClient
 
 from snapback import auth
 from snapback.api import SESSION_COOKIE, create_app
-from snapback.auth import AuthUnavailable, LoginThrottle, SessionStore, smb_sign_in
+from snapback.auth import AuthUnavailable, LoginThrottle, SessionStore, account_key, smb_sign_in
 from snapback.config import Config, RootConfig
 from snapback.ops import Ops
 from snapback.workers import InProcessBackend, WorkerUnavailable
@@ -281,11 +284,74 @@ def test_session_expires_when_idle_and_slides_with_use():
 def test_throttle_forgets_after_the_window():
     t = [0.0]
     throttle = LoginThrottle(2, 60, clock=lambda: t[0])
-    throttle.failed("a")
-    throttle.failed("a")
-    assert throttle.blocked("a") and not throttle.blocked("b")
+    assert throttle.reserve("a") and throttle.reserve("a")
+    assert not throttle.reserve("a") and throttle.reserve("b")
     t[0] = 61
-    assert not throttle.blocked("a")
+    assert throttle.reserve("a")
+
+
+def test_throttle_gives_an_attempt_back():
+    throttle = LoginThrottle(2)
+    assert throttle.reserve("a") and throttle.reserve("a")
+    throttle.release("a")
+    assert throttle.reserve("a") and not throttle.reserve("a")
+    throttle.clear("a")
+    assert throttle.reserve("a")
+
+
+@pytest.mark.parametrize("spelling", ["alice", "ALICE", "Alice", r"NAS\alice", r"corp.example\Alice", "alice@corp.example"])
+def test_account_key_is_the_same_for_every_spelling(spelling):
+    assert account_key(spelling) == "alice"
+
+
+def test_concurrent_failures_cannot_get_past_the_limit(make_client):
+    calls = []
+    lock = threading.Lock()
+
+    def slow_refusal(u, p, shares):
+        with lock:
+            calls.append(u)
+        time.sleep(0.2)  # long enough for every request to arrive before the first answer
+        return None
+
+    client = make_client(slow_refusal)
+    codes = []
+    threads = [threading.Thread(target=lambda: codes.append(login(client, "victim", "x").status_code)) for _ in range(30)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(calls) == 5
+    assert sorted(codes) == [401] * 5 + [429] * 25
+
+
+def test_every_spelling_of_an_account_counts_against_one_limit(make_client):
+    calls = []
+
+    def verify(u, p, shares):
+        calls.append(u)
+        return None
+
+    client = make_client(verify)
+    for name in ("alice", "ALICE", r"NAS\alice", "alice@corp", "Alice"):
+        assert login(client, name, "x").status_code == 401
+    assert login(client, r"OTHER\Alice", "x").status_code == 429
+    assert len(calls) == 5
+
+
+def test_an_unreachable_server_does_not_use_up_attempts(make_client):
+    def unreachable(u, p, shares):
+        raise AuthUnavailable("ConnectionRefusedError")
+
+    client = make_client(unreachable)
+    assert [login(client, "alice", "secret").status_code for _ in range(30)] == [503] * 30
+
+
+def test_successful_sign_ins_do_not_use_up_the_address_limit(make_client):
+    client = make_client()
+    assert [login(client).status_code for _ in range(25)] == [200] * 25
+    for _ in range(4):
+        assert login(client, "alice", "wrong").status_code == 401
 
 
 class FakeConnection:

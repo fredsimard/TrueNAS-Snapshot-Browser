@@ -30,6 +30,7 @@ from .auth import (
     SessionStore,
     SignIn,
     UserSession,
+    account_key,
     smb_sign_in,
 )
 from .config import Config
@@ -177,23 +178,33 @@ def create_app(
     def login(body: LoginRequest, request: Request, response: Response) -> dict:
         username = body.username.strip()
         address = request.client.host if request.client else "unknown"
-        user_key = username.lower()
+        user_key = account_key(username)
         if not username or not body.password:
             raise HTTPException(401, "bad_credentials")
-        if user_throttle.blocked(user_key) or address_throttle.blocked(address):
+        # An attempt counts from the moment it starts, so concurrent ones can't all get past the limit
+        # before the first answer is known.
+        if not user_throttle.reserve(user_key):
+            log.warning("sign-in blocked for %r from %s: too many failures", username, address)
+            raise HTTPException(429, "too_many_attempts")
+        if not address_throttle.reserve(address):
+            user_throttle.release(user_key)
             log.warning("sign-in blocked for %r from %s: too many failures", username, address)
             raise HTTPException(429, "too_many_attempts")
         # The password is checked whether or not the account is allowed, so the answer never reveals
         # which usernames are on the list. Shares are only tried for allowed accounts.
         allowed = config.allowed_users is None or username.casefold() in config.allowed_users
+        refused = False
         try:
             shares = verify(username, body.password, share_names if allowed else [])
+            refused = shares is None
         except AuthUnavailable as e:
             log.error("sign-in unavailable, SMB server unreachable: %s", e)
             raise HTTPException(503, "auth_unavailable") from None
+        finally:
+            if not refused:  # only a refused password stays counted
+                user_throttle.release(user_key)
+                address_throttle.release(address)
         if shares is None:
-            user_throttle.failed(user_key)
-            address_throttle.failed(address)
             log.warning("sign-in failed for %r from %s", username, address)
             raise HTTPException(401, "bad_credentials")
         user_throttle.clear(user_key)

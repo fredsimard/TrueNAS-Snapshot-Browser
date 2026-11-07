@@ -176,30 +176,58 @@ def _end(sessions: list[UserSession]) -> None:
             s.workers.close()
 
 
+def account_key(username: str) -> str:
+    """One key for the spellings of an account that the SMB server treats as the same one: case,
+    DOMAIN\\user and user@realm. A lockout policy counts attempts per account, whatever the spelling."""
+    name = username.casefold().rpartition("\\")[2]
+    return name.partition("@")[0] or name
+
+
 class LoginThrottle:
-    """Blocks a key after too many failures within the window."""
+    """Blocks a key after too many failures within the window.
+
+    An attempt is counted when it starts (reserve), not when it fails, so concurrent attempts can't
+    all get past the limit before the first one's answer is known. An attempt that turns out not to
+    be a failure is given back (release).
+    """
+
+    PRUNE_SECONDS = 60.0
 
     def __init__(self, max_failures: int, window_seconds: float = THROTTLE_WINDOW_SECONDS, clock=time.monotonic):
         self._max = max_failures
         self._window = window_seconds
         self._clock = clock
         self._lock = threading.Lock()
-        self._failures: dict[str, list[float]] = {}
+        self._attempts: dict[str, list[float]] = {}
+        self._next_prune = 0.0
 
-    def blocked(self, key: str) -> bool:
-        cutoff = self._clock() - self._window
-        with self._lock:
-            return sum(t > cutoff for t in self._failures.get(key, ())) >= self._max
-
-    def failed(self, key: str) -> None:
+    def reserve(self, key: str) -> bool:
+        """Count an attempt for key, unless it is already at its limit (then False, nothing counted)."""
         now = self._clock()
         cutoff = now - self._window
         with self._lock:
-            self._failures = {
-                k: kept for k, times in self._failures.items() if (kept := [t for t in times if t > cutoff])
-            }
-            self._failures.setdefault(key, []).append(now)
+            if now >= self._next_prune:
+                self._next_prune = now + self.PRUNE_SECONDS
+                self._attempts = {
+                    k: kept for k, times in self._attempts.items() if (kept := [t for t in times if t > cutoff])
+                }
+            times = [t for t in self._attempts.get(key, ()) if t > cutoff]
+            if len(times) >= self._max:
+                self._attempts[key] = times
+                return False
+            times.append(now)
+            self._attempts[key] = times
+            return True
+
+    def release(self, key: str) -> None:
+        """Give back the attempt reserved last for key."""
+        with self._lock:
+            times = self._attempts.get(key)
+            if times:
+                times.pop()
+                if not times:
+                    del self._attempts[key]
 
     def clear(self, key: str) -> None:
         with self._lock:
-            self._failures.pop(key, None)
+            self._attempts.pop(key, None)
