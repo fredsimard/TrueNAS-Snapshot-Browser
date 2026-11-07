@@ -101,9 +101,8 @@ Each row compares the item's state at the selected point with its state now.
 
 ## Date picker snapping
 
-- Days outside the available range are disabled.
-- Picking a day selects the last point whose label day is that day. Toast: "Showing <label>" / "The last version from <day>."
-- If that day has no point, the picker selects the point nearest the end of that day. Toast: "No version from <day>" / "Showing <label>, the closest one."
+- Only days with at least one version can be picked; the others are dimmed and disabled. Days with several versions are semibold. A midnight version counts for the day it closes; Now counts for today.
+- Picking a day selects the last point whose label day is that day. Toast: "Showing <label>" / "The last version from <day>." Footnote: "You’ll see the last version of the day you pick."
 
 ## Downloads
 

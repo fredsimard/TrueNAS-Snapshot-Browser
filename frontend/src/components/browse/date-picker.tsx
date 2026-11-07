@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { CalendarIcon } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -21,6 +21,18 @@ export function DatePicker({
   const last = startOfDay(points[points.length - 1].day)
   const current = points[selected].day
 
+  // Versions per day (a midnight version closes the previous day; Now counts for today). Days
+  // without one can't be picked; days with several are bold.
+  const perDay = useMemo(() => {
+    const m = new Map<number, number>()
+    for (const p of points) {
+      const k = startOfDay(p.day).getTime()
+      m.set(k, (m.get(k) ?? 0) + 1)
+    }
+    return m
+  }, [points])
+  const versions = (d: Date) => perDay.get(startOfDay(d).getTime()) ?? 0
+
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
@@ -36,7 +48,9 @@ export function DatePicker({
           defaultMonth={current}
           startMonth={first}
           endMonth={last}
-          disabled={[{ before: first }, { after: last }]}
+          disabled={[{ before: first }, { after: last }, (d: Date) => versions(d) === 0]}
+          modifiers={{ several: (d: Date) => versions(d) > 1 }}
+          modifiersClassNames={{ several: '[&_button]:font-semibold' }}
           onSelect={(day) => {
             if (!day) return
             const snap = snapToDay(points, day)
@@ -44,7 +58,7 @@ export function DatePicker({
             onPick(snap.index, snap.exact, day)
           }}
         />
-        <p className="px-3 pb-3 text-xs text-muted-foreground">You’ll see the closest version to the day you pick.</p>
+        <p className="px-3 pb-3 text-xs text-muted-foreground">You’ll see the last version of the day you pick.</p>
       </PopoverContent>
     </Popover>
   )
