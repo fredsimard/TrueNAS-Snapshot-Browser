@@ -27,7 +27,9 @@ from .paths import Denied, Missing, _translate, _visible, opened_dir
 
 MAX_ZIP_ENTRIES = 100_000
 _DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
-_FILE_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | getattr(os, "O_NOCTTY", 0)
+# O_NONBLOCK: opening a FIFO for reading would otherwise wait for a writer for ever, taking the worker
+# with it. It is cleared again for what turns out to be a regular file.
+_FILE_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK | getattr(os, "O_NOCTTY", 0)
 _ZIP_EPOCH = (1980, 1, 1, 0, 0, 0)
 
 
@@ -128,6 +130,7 @@ def open_file(base: str, parts: Sequence[str]) -> tuple[int, os.stat_result]:
     if not stat.S_ISREG(st.st_mode):
         os.close(fd)
         raise Missing()
+    os.set_blocking(fd, True)
     return fd, st
 
 

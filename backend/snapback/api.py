@@ -9,6 +9,7 @@ the signed-in account (workers.py); this process never reads a share.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import secrets
@@ -30,6 +31,7 @@ from .auth import (
     SessionStore,
     SignIn,
     UserSession,
+    account_key,
     smb_sign_in,
 )
 from .config import Config
@@ -48,6 +50,8 @@ from .workers import Backend, WorkerUnavailable
 log = logging.getLogger(__name__)
 
 SESSION_COOKIE = "snapback_session"
+MAX_LOGIN_BODY_BYTES = 16 << 10  # a username and a password
+MAX_BODY_BYTES = 8 << 20  # a download request naming up to MAX_NAMES items
 
 
 class LoginRequest(BaseModel):
@@ -59,6 +63,67 @@ class DownloadRequest(BaseModel):
     path: str = Field("", max_length=8192)  # the folder the items are in
     at: str = Field("now", max_length=64)
     names: list[str] = Field(min_length=1, max_length=MAX_NAMES)
+
+
+# The page is one bundle, one stylesheet and its fonts, all served from here. Styles stay open to
+# inline ones: React sets style attributes and the toast library adds a <style> element. No inline
+# scripts (the theme script is a file), no framing, no plugins, and requests go nowhere else.
+CONTENT_SECURITY_POLICY = "; ".join([
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data:",
+    "font-src 'self' data:",
+    "connect-src 'self'",
+    "object-src 'none'",
+    "base-uri 'none'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+])
+PERMISSIONS_POLICY = "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+
+
+class BodyLimit:
+    """Plain ASGI middleware: refuses a request whose body is over the limit before any of it is read.
+
+    FastAPI reads a whole body into memory before validating it, so without this anyone, signed in or
+    not, could make the web process hold as much as they care to send. The size is the declared
+    Content-Length, which the HTTP server enforces; a body of unknown length (chunked) is refused.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        headers = dict(scope["headers"])
+        limit = MAX_LOGIN_BODY_BYTES if scope["path"] == "/api/login" else MAX_BODY_BYTES
+        if b"transfer-encoding" in headers:
+            return await self._refuse(send, 411, "length_required")
+        declared = headers.get(b"content-length")
+        if declared is not None:
+            try:
+                too_big = int(declared) > limit
+            except ValueError:
+                too_big = True
+            if too_big:
+                return await self._refuse(send, 413, "payload_too_large")
+        await self.app(scope, receive, send)
+
+    @staticmethod
+    async def _refuse(send, status: int, code: str) -> None:
+        body = json.dumps({"error": code}).encode()
+        await send({
+            "type": "http.response.start",
+            "status": status,
+            "headers": [
+                (b"content-type", b"application/json"),
+                (b"content-length", str(len(body)).encode()),
+                (b"connection", b"close"),  # the body was not read
+            ],
+        })
+        await send({"type": "http.response.body", "body": body})
 
 
 class SecurityHeaders:
@@ -79,6 +144,8 @@ class SecurityHeaders:
                 h["X-Content-Type-Options"] = "nosniff"
                 h["Referrer-Policy"] = "no-referrer"
                 h["X-Frame-Options"] = "DENY"
+                h["Content-Security-Policy"] = CONTENT_SECURITY_POLICY
+                h["Permissions-Policy"] = PERMISSIONS_POLICY
                 if api:
                     h["Cache-Control"] = "no-store"
             await send(message)
@@ -109,6 +176,7 @@ def create_app(
     share_names = list(dict.fromkeys(rc.share_name for rc in config.roots))
 
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+    app.add_middleware(BodyLimit)  # inside SecurityHeaders: its refusals carry the headers too
     app.add_middleware(SecurityHeaders)
     # An aborted download is reported in the audit log; the server's traceback for it is noise.
     if _drop_aborted not in logging.getLogger("uvicorn.error").filters:
@@ -126,7 +194,7 @@ def create_app(
     @app.exception_handler(Exception)
     async def unexpected_error(request: Request, exc: Exception) -> JSONResponse:
         if not isinstance(exc, DownloadAborted):
-            log.exception("unhandled error on %s", request.url.path)
+            log.exception("unhandled error on %r", request.url.path)
         return JSONResponse({"error": "internal"}, status_code=500)
 
     def signed_in(request: Request) -> UserSession:
@@ -177,29 +245,40 @@ def create_app(
     def login(body: LoginRequest, request: Request, response: Response) -> dict:
         username = body.username.strip()
         address = request.client.host if request.client else "unknown"
-        user_key = username.lower()
+        user_key = account_key(username)
         if not username or not body.password:
             raise HTTPException(401, "bad_credentials")
-        if user_throttle.blocked(user_key) or address_throttle.blocked(address):
+        # An attempt counts from the moment it starts, so concurrent ones can't all get past the limit
+        # before the first answer is known.
+        if not user_throttle.reserve(user_key):
+            log.warning("sign-in blocked for %r from %s: too many failures", username, address)
+            raise HTTPException(429, "too_many_attempts")
+        if not address_throttle.reserve(address):
+            user_throttle.release(user_key)
             log.warning("sign-in blocked for %r from %s: too many failures", username, address)
             raise HTTPException(429, "too_many_attempts")
         # The password is checked whether or not the account is allowed, so the answer never reveals
         # which usernames are on the list. Shares are only tried for allowed accounts.
         allowed = config.allowed_users is None or username.casefold() in config.allowed_users
+        refused = False
         try:
             shares = verify(username, body.password, share_names if allowed else [])
+            refused = shares is None
         except AuthUnavailable as e:
             log.error("sign-in unavailable, SMB server unreachable: %s", e)
             raise HTTPException(503, "auth_unavailable") from None
+        finally:
+            if not refused:  # only a refused password stays counted
+                user_throttle.release(user_key)
+                address_throttle.release(address)
         if shares is None:
-            user_throttle.failed(user_key)
-            address_throttle.failed(address)
             log.warning("sign-in failed for %r from %s", username, address)
             raise HTTPException(401, "bad_credentials")
         user_throttle.clear(user_key)
         if not allowed:
             log.warning("sign-in refused for %r from %s: not in ALLOWED_USERS", username, address)
             raise HTTPException(403, "not_allowed")
+        sessions.make_room(username)  # before the worker is started, so there is room for it
         try:
             workers = backend.start(username)
         except WorkerUnavailable as e:

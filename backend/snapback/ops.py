@@ -171,7 +171,8 @@ class Ops:
                    "folders": plan.folders, "too_large": False, "limit": self.max_download_bytes}
         if not start:
             return summary
-        return _WithFd(summary, start_zip(base, folder, plan, self.tz), self._audit(tl, at, folder, names))
+        found = tuple(i.arc[0] for i in top)  # what exists, not whatever names were asked for
+        return _WithFd(summary, start_zip(base, folder, plan, self.tz), self._audit(tl, at, folder, found))
 
 
 class _WithFd:

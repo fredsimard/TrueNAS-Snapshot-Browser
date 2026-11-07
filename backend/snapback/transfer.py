@@ -126,7 +126,9 @@ class DownloadResponse(StreamingResponse):
 
 def log_end(d: Download, reason: str = "") -> None:
     a = d.audit
-    what = a.get("path", "?") + (f": {a['items']}" if a.get("items") else "")
+    # Paths and names come from users and from the share: quoted and escaped, so none can end the line
+    # and start another that looks like a log entry of its own.
+    what = repr(a.get("path", "?")) + (f": {a['items']!r}" if a.get("items") else "")
     sent = f"{d.sent} of {d.total} bytes" if d.kind == "file" else f"{d.sent} bytes sent, {d.total} bytes of files"
     audit.info(
         "download %s by %r: %s %s as of %s, %s%s",

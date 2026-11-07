@@ -1,9 +1,19 @@
+import threading
+import time
+
 import pytest
 from fastapi.testclient import TestClient
 
 from snapback import auth
 from snapback.api import SESSION_COOKIE, create_app
-from snapback.auth import AuthUnavailable, LoginThrottle, SessionStore, smb_sign_in
+from snapback.auth import (
+    MAX_SESSIONS_PER_USER,
+    AuthUnavailable,
+    LoginThrottle,
+    SessionStore,
+    account_key,
+    smb_sign_in,
+)
 from snapback.config import Config, RootConfig
 from snapback.ops import Ops
 from snapback.workers import InProcessBackend, WorkerUnavailable
@@ -225,6 +235,36 @@ def test_empty_values_never_reach_the_smb_server(make_client):
     assert calls == []
 
 
+def test_an_oversized_login_is_refused_before_it_is_read(make_client):
+    calls = []
+    client = make_client(lambda u, p, shares: calls.append(u) or set())
+    r = client.post("/api/login", content=b"x" * (16 * 1024 + 1), headers={"content-type": "application/json"})
+    assert (r.status_code, r.json()) == (413, {"error": "payload_too_large"})
+    assert r.headers["x-content-type-options"] == "nosniff" and r.headers["connection"] == "close"
+    assert calls == []
+
+
+def test_a_body_of_unknown_length_is_refused(make_client):
+    client = make_client()
+    r = client.post("/api/login", content=iter([b'{"username":"alice",', b'"password":"secret"}']))
+    assert (r.status_code, r.json()) == (411, {"error": "length_required"})
+
+
+def test_a_bad_content_length_is_refused(make_client):
+    r = make_client().post("/api/login", content=b"{}", headers={"content-length": "lots"})
+    assert r.status_code == 413
+
+
+def test_download_requests_have_a_larger_limit(make_client):
+    client = make_client()
+    assert login(client).status_code == 200
+    names = [f"{i:06d}" + "n" * 200 for i in range(10_000)]  # 2 MB: fine
+    r = client.post("/api/roots/s/downloads", json={"path": "", "names": names})
+    assert r.status_code == 404  # reached the app: nothing by those names
+    r = client.post("/api/roots/s/downloads", content=b"x" * ((8 << 20) + 1), headers={"content-type": "application/json"})
+    assert (r.status_code, r.json()) == (413, {"error": "payload_too_large"})
+
+
 def test_malformed_request_does_not_echo_the_password(make_client):
     client = make_client()
     r = client.post("/api/login", json={"password": "hunter2-secret"})
@@ -278,14 +318,125 @@ def test_session_expires_when_idle_and_slides_with_use():
     assert store.get(None) is None
 
 
+class Workers:
+    def __init__(self):
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+
+def test_an_account_keeps_a_limited_number_of_sessions():
+    t = [0.0]
+    store = SessionStore(idle_seconds=1000, clock=lambda: t[0])
+    ours, tokens = [], []
+    bob = Workers()
+    store.make_room("bob")
+    store.create("bob", {"s"}, bob)
+    for i in range(MAX_SESSIONS_PER_USER):
+        t[0] = i
+        store.make_room("alice")
+        ours.append(Workers())
+        tokens.append(store.create("alice", {"s"}, ours[-1]))
+    assert not any(w.closed for w in ours)
+    t[0] = 10
+    assert store.get(tokens[0]) is not None  # used just now: no longer the least recently used
+    store.make_room("Alice")  # same account, spelled differently
+    ours.append(Workers())
+    tokens.append(store.create("Alice", {"s"}, ours[-1]))
+    assert [w.closed for w in ours] == [False, True, False, False, False]  # the least recently used went
+    assert store.get(tokens[1]) is None and not bob.closed
+
+
+def test_making_room_ends_expired_sessions_before_a_worker_is_started():
+    t = [0.0]
+    store = SessionStore(idle_seconds=100, clock=lambda: t[0])
+    gone = Workers()
+    store.create("bob", {"s"}, gone)
+    t[0] = 150
+    store.make_room("alice")
+    assert gone.closed
+
+
+def test_signing_in_again_and_again_replaces_the_oldest_sessions(make_client):
+    first = make_client()
+    clients = [first] + [TestClient(first.app) for _ in range(MAX_SESSIONS_PER_USER)]
+    for c in clients:
+        assert login(c).status_code == 200
+    assert [c.get("/api/info").json()["user"] for c in clients] == [None] + ["alice"] * MAX_SESSIONS_PER_USER
+
+
 def test_throttle_forgets_after_the_window():
     t = [0.0]
     throttle = LoginThrottle(2, 60, clock=lambda: t[0])
-    throttle.failed("a")
-    throttle.failed("a")
-    assert throttle.blocked("a") and not throttle.blocked("b")
+    assert throttle.reserve("a") and throttle.reserve("a")
+    assert not throttle.reserve("a") and throttle.reserve("b")
     t[0] = 61
-    assert not throttle.blocked("a")
+    assert throttle.reserve("a")
+
+
+def test_throttle_gives_an_attempt_back():
+    throttle = LoginThrottle(2)
+    assert throttle.reserve("a") and throttle.reserve("a")
+    throttle.release("a")
+    assert throttle.reserve("a") and not throttle.reserve("a")
+    throttle.clear("a")
+    assert throttle.reserve("a")
+
+
+@pytest.mark.parametrize("spelling", ["alice", "ALICE", "Alice", r"NAS\alice", r"corp.example\Alice", "alice@corp.example"])
+def test_account_key_is_the_same_for_every_spelling(spelling):
+    assert account_key(spelling) == "alice"
+
+
+def test_concurrent_failures_cannot_get_past_the_limit(make_client):
+    calls = []
+    lock = threading.Lock()
+
+    def slow_refusal(u, p, shares):
+        with lock:
+            calls.append(u)
+        time.sleep(0.2)  # long enough for every request to arrive before the first answer
+        return None
+
+    client = make_client(slow_refusal)
+    codes = []
+    threads = [threading.Thread(target=lambda: codes.append(login(client, "victim", "x").status_code)) for _ in range(30)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(calls) == 5
+    assert sorted(codes) == [401] * 5 + [429] * 25
+
+
+def test_every_spelling_of_an_account_counts_against_one_limit(make_client):
+    calls = []
+
+    def verify(u, p, shares):
+        calls.append(u)
+        return None
+
+    client = make_client(verify)
+    for name in ("alice", "ALICE", r"NAS\alice", "alice@corp", "Alice"):
+        assert login(client, name, "x").status_code == 401
+    assert login(client, r"OTHER\Alice", "x").status_code == 429
+    assert len(calls) == 5
+
+
+def test_an_unreachable_server_does_not_use_up_attempts(make_client):
+    def unreachable(u, p, shares):
+        raise AuthUnavailable("ConnectionRefusedError")
+
+    client = make_client(unreachable)
+    assert [login(client, "alice", "secret").status_code for _ in range(30)] == [503] * 30
+
+
+def test_successful_sign_ins_do_not_use_up_the_address_limit(make_client):
+    client = make_client()
+    assert [login(client).status_code for _ in range(25)] == [200] * 25
+    for _ in range(4):
+        assert login(client, "alice", "wrong").status_code == 401
 
 
 class FakeConnection:

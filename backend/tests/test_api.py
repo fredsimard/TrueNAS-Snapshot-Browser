@@ -1,3 +1,6 @@
+import re
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -47,6 +50,23 @@ def test_info(setup):
         "user": "alice",
         "roots": [{"id": "projects", "label": "Projects"}],
     }
+
+
+@pytest.mark.parametrize("url", ["/api/info", "/", "/assets/app.js", "/api/nothing-here"])
+def test_every_response_carries_the_security_headers(setup, url):
+    client, _ = setup
+    h = client.get(url).headers
+    assert h["x-content-type-options"] == "nosniff" and h["x-frame-options"] == "DENY"
+    csp = dict(d.split(" ", 1) for d in h["content-security-policy"].split("; "))
+    assert csp["script-src"] == "'self'"  # no inline scripts, no eval
+    assert csp["frame-ancestors"] == "'none'" and csp["object-src"] == "'none'" and csp["default-src"] == "'self'"
+    assert h["permissions-policy"].startswith("camera=()")
+
+
+def test_the_page_has_no_inline_script():
+    # The policy forbids them: the theme script is public/theme-init.js, not part of index.html.
+    html = (Path(__file__).parents[2] / "frontend" / "index.html").read_text()
+    assert re.findall(r"<script(?![^>]*\bsrc=)[^>]*>", html) == []
 
 
 def test_points_are_opaque(setup):
