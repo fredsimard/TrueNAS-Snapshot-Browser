@@ -35,6 +35,7 @@ from typing import NoReturn, Protocol
 
 from .identity import HostAccounts, Identity
 from .ops import Ops
+from .tls import HostTLS
 
 log = logging.getLogger(__name__)
 
@@ -192,8 +193,10 @@ def supervise(
     accounts: HostAccounts,
     web_pid: int | None = None,
     drop: Callable[[Identity], None] = drop_to,
+    tls: HostTLS | None = None,
 ) -> int:
-    """Fork workers on request until the web process goes away or the host's accounts change.
+    """Fork workers on request until the web process goes away, or the host's accounts or the
+    certificate change.
 
     Returns the exit code for the container.
     """
@@ -212,6 +215,9 @@ def supervise(
             workers.discard(pid)
         if accounts.replaced():
             log.warning("the host's accounts changed; exiting so the app restarts and reads them")
+            return EXIT_ACCOUNTS_CHANGED
+        if tls is not None and tls.changed():
+            log.warning("the TLS certificate changed; exiting so the app restarts and loads it")
             return EXIT_ACCOUNTS_CHANGED
         ready, _, _ = select.select([ctl], [], [], POLL_SECONDS)
         if not ready:

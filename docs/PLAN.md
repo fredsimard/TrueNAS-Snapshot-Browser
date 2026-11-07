@@ -143,7 +143,7 @@ Two-axis navigation, matching how the problem was originally framed. Full detail
 
 ## 11. Deployment
 
-Single container, custom app in TrueNAS Apps. Host path mounts, read-only, one per distinct `dataset_mountpoint` (not per share root — mounting the dataset mountpoint is what makes `.zfs` reachable). Exposed on the LAN only; TLS via the existing reverse proxy if wanted.
+Single container, custom app in TrueNAS Apps. Host path mounts, read-only, one per distinct `dataset_mountpoint` (not per share root — mounting the dataset mountpoint is what makes `.zfs` reachable). Exposed on the LAN only. HTTPS with the NAS's own certificate when it's mounted into the app (no proxy needed); plain HTTP otherwise.
 
 ## 12. Open risks
 

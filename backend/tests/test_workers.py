@@ -234,3 +234,17 @@ def test_a_workers_descriptor_reaches_the_web_process(supervisor):
     reply = backend.start("alice").call({"op": "pipe"})
     assert os.read(reply["fd"], 100) == b"from the worker"
     os.close(reply["fd"])
+
+
+class ChangedTLS:
+    def changed(self):
+        return True
+
+
+def test_a_new_certificate_stops_the_supervisor(tmp_path, monkeypatch):
+    monkeypatch.setattr(workers, "POLL_SECONDS", 0.05)
+    (tmp_path / "passwd").write_text(PASSWD)
+    (tmp_path / "group").write_text(GROUP)
+    accounts = HostAccounts(str(tmp_path / "passwd"), str(tmp_path / "group"))
+    web_end, sup_end = socket.socketpair()
+    assert supervise(sup_end, EchoOps(), accounts, drop=fake_drop, tls=ChangedTLS()) == EXIT_ACCOUNTS_CHANGED

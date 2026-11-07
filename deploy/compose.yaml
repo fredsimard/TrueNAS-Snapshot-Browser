@@ -35,6 +35,17 @@ services:
         source: /etc/group
         target: /host/etc/group
         read_only: true
+      # Optional: the NAS's own certificate, for HTTPS. TrueNAS writes each one it holds to
+      # /etc/certificates/<name>.crt and .key; use the one for the name users type. Without these
+      # two mounts the app serves plain HTTP.
+      - type: bind
+        source: /etc/certificates/nas-example-com.crt
+        target: /host/tls/tls.crt
+        read_only: true
+      - type: bind
+        source: /etc/certificates/nas-example-com.key
+        target: /host/tls/tls.key
+        read_only: true
       # One per distinct dataset mountpoint, same path inside and outside, read-only.
       - type: bind
         source: /mnt/tank/studio
