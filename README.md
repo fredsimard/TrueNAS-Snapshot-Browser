@@ -12,7 +12,8 @@ their share by folder and by time, and see what changed or was deleted. Plan and
 | 1–2: read-only browser, config, multi-root | Done, checked on real snapshots |
 | 3: sign-in | Done, checked on TrueNAS |
 | 4: per-user permissions | Done, checked on TrueNAS: users see only the shares Samba lets them connect to, `ALLOWED_USERS` limits who can sign in, and every file access runs as the signed-in account, so folder permissions apply. |
-| 5–7: downloads, AD, packaging | Not started |
+| 5: downloads | Built, not yet checked on TrueNAS: files, folders and selections (as a zip made while it's sent), a size limit for zips, progress and cancel, an audit line per download in the app's log. |
+| 6–7: AD, packaging | Not started |
 
 **Not ready for staff yet.** The app serves plain HTTP, so passwords cross the LAN unencrypted.
 
@@ -38,7 +39,8 @@ Environment (set at app creation):
 | `SNAPSHOT_PREFIXES` | **Required.** Comma-separated snapshot name prefixes users may see, e.g. `auto-,daily-`. The app refuses to start without it. |
 | `SMB_HOST` | **Required.** The NAS's network address. Sign-in checks passwords by opening an SMB session to it. `127.0.0.1` is refused: in the container that's the container itself. |
 | `ALLOWED_USERS` | **Required.** `all`, or comma-separated usernames allowed to use the app (case doesn't matter). Others get "This account can't use this app" after a correct password. |
-| `TZ` | Timezone the timestamps in snapshot names are written in. Defaults to the container's local time. |
+| `TZ` | Timezone the timestamps in snapshot names are written in. Defaults to the container's local time. Also used for the dates in download names. |
+| `MAX_DOWNLOAD_GB` | Largest zip one download may hold, in gigabytes of file contents. Default `20`. Larger folders are refused before anything is sent; single files have no limit. |
 | `SNAPBACK_CONFIG` | Config file path. Default `/config/snapback.yaml`. |
 
 Config file: see [deploy/snapback.example.yaml](deploy/snapback.example.yaml). Each root is a share

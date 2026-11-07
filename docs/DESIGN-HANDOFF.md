@@ -53,7 +53,7 @@ All data in the mockups is made up: server "Studio Server", the shares, the file
   - Columns: checkbox 40 · status 84 · Name (flex) · dot 20 · Date Modified 208 · Size 96 (right-aligned) · Kind 208.
   - Status column: every row has a 60 px pill, so the column reads as one: "Changed", "Deleted", or an empty outlined placeholder. Always shown, also at Now.
   - Dot column: the dot marking a date that differs, so the dates stay aligned.
-- Item count under the listing, bottom left, 12 px below it: "34 files and 56 folders", "23 folders", "5 files", "1 file", "1 folder". It counts the rows shown, so it follows the filter. Empty while loading and when a folder state replaces the listing. When items are selected, a 36 px bar appears below the listing with "N selected" and a Download button.
+- Item count under the listing, bottom left, 12 px below it: "34 files and 56 folders", "23 folders", "5 files", "1 file", "1 folder". It counts the rows shown, so it follows the filter. Empty while loading and when a folder state replaces the listing. When items are checked, a 36 px bar replaces it: "N selected", the count in muted text ("of 34 files and 56 folders"), and a Download button on the right. Checked rows are kept per folder; rows hidden by the filter don't count.
 - File detail `Sheet`: 384 px box on the right, level with the breadcrumb box. It pushes the breadcrumb and listing narrower instead of overlaying them: no overlay, non-modal. It opens for files only.
 
 ## Timeline
@@ -107,10 +107,10 @@ Each row compares the item's state at the selected point with its state now.
 
 - File name: `Name (YYYY-MM-DD HH.MM).ext` using the version's modified time, e.g. `Logo_final (2026-09-12 14.00).psd`.
 - A folder zip uses the selected point's time: `Retouched (2026-09-28 09.00).zip`.
-- Any folder opens a confirm `AlertDialog` first: "Download “X” as a zip?", with the size and a note that preparing it can take several minutes. Button: "Download 6.4 GB".
-- Folders over 20 GB are refused with an `AlertDialog`: "“X” is too large to download at once", with the size, the limit and "ask IT". The 20 GB limit is an assumption; make it configurable.
-- Zip progress: a `Toast` with `Progress`, "a of b · a few minutes left", and a Cancel button.
-- File downloads: a toast "Downloaded / Saved to your Mac as <name>".
+- Any folder, or several checked items, opens a confirm `AlertDialog` first: "Download “X” as a zip?" (or "Download 3 items as a zip?"), "It holds 34 files and 5 folders, 6.4 GB in all. Preparing it can take several minutes.", then "Saves as <name>" in Geist Mono. Button: "Download 6.4 GB". Several items zip under the current folder's name. The dialog opens as soon as the action is chosen, with the Download button disabled while the server measures the folder; if that takes more than a second, "Calculating the size…" with a spinner. A single file starts without a dialog.
+- Over the limit (`MAX_DOWNLOAD_GB`, default 20) is refused before anything starts: "“X” is too large to download at once", "It’s more than 20 GB, the most that can be downloaded at once. Open it and download what you need from inside, or ask IT." The exact size isn't shown: counting stops at the limit.
+- Progress: a `Toast` titled "Downloading <name>" with `Progress`, "a of b · a few minutes left", and a Cancel button. It appears only if the download takes more than about a second.
+- When it ends: "Downloaded / Saved to your Mac as <name>"; "The download didn’t finish / Try again; if it keeps happening, ask IT."; or "Download stopped" if the browser stopped it.
 
 ## Folder state copy
 

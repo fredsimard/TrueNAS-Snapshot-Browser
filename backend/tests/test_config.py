@@ -5,6 +5,7 @@ from snapback.config import (
     load_config,
     parse_allowed_users,
     parse_config,
+    parse_max_download,
     parse_prefixes,
     parse_smb_host,
     parse_timezone,
@@ -171,3 +172,14 @@ def test_timezone():
     assert parse_timezone(":Europe/Paris").key == "Europe/Paris"
     with pytest.raises(ConfigError):
         parse_timezone("Mars/Olympus")
+
+
+@pytest.mark.parametrize("raw,want", [(None, 20 * 10**9), ("", 20 * 10**9), ("5", 5 * 10**9), (" 0.5 ", 5 * 10**8)])
+def test_max_download(raw, want):
+    assert parse_max_download(raw) == want
+
+
+@pytest.mark.parametrize("raw", ["0", "-1", "lots", "nan", "inf"])
+def test_max_download_invalid(raw):
+    with pytest.raises(ConfigError, match="MAX_DOWNLOAD_GB"):
+        parse_max_download(raw)

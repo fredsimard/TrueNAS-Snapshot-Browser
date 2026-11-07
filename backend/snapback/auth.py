@@ -21,7 +21,7 @@ import threading
 import time
 import uuid
 from collections.abc import Callable, Collection, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 
 from smbprotocol.connection import Connection
@@ -114,6 +114,7 @@ class UserSession:
     roots: frozenset[str]  # ids of the roots this user may browse
     expires: float
     workers: Closable | None = None  # reads files as this account (workers.Runner)
+    downloads: dict = field(default_factory=dict)  # id → transfer.Download
 
 
 class SessionStore:

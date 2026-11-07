@@ -7,7 +7,7 @@ import {
   type OnChangeFn,
   type SortingState,
 } from '@tanstack/react-table'
-import { ChevronDownIcon, ChevronUpIcon, FolderOpenIcon, HistoryIcon } from 'lucide-react'
+import { ChevronDownIcon, ChevronUpIcon, DownloadIcon, FolderOpenIcon, HistoryIcon } from 'lucide-react'
 
 import { FileIcon } from '@/components/browse/file-icon'
 import {
@@ -25,13 +25,15 @@ import {
 } from '@/components/ui/context-menu'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { formatSize, modifiedLabel } from '@/lib/format'
 import type { FileRow } from '@/lib/rows'
 import { cn } from '@/lib/utils'
 
 const WIDTHS: Record<string, string> = {
-  status: 'w-[84px]',
+  check: 'w-10',
+  status: 'w-[76px]',
   name: '',
   mark: 'w-5',
   mtime: 'w-[208px]',
@@ -51,6 +53,10 @@ export function FileTable({
   onEnterFolder,
   skeleton,
   stale,
+  checked,
+  onCheck,
+  onCheckAll,
+  onDownload,
 }: {
   rows: FileRow[]
   sorting: SortingState
@@ -63,17 +69,45 @@ export function FileTable({
   onEnterFolder: (name: string) => void
   skeleton: boolean
   stale: boolean
+  checked: ReadonlySet<string>
+  onCheck: (name: string, on: boolean) => void
+  onCheckAll: (on: boolean) => void
+  onDownload: (name: string) => void
 }) {
+  const checkedCount = rows.filter((r) => checked.has(r.name)).length
   const [menuRow, setMenuRow] = useState<FileRow | null>(null)
 
   const columns = useMemo<ColumnDef<FileRow>[]>(
     () => [
       {
+        id: 'check',
+        enableSorting: false,
+        header: () => (
+          <div className="flex items-center pl-4">
+            <Checkbox
+              aria-label="Select all"
+              disabled={rows.length === 0}
+              checked={checkedCount === 0 ? false : checkedCount === rows.length ? true : 'indeterminate'}
+              onCheckedChange={(v) => onCheckAll(v === true)}
+            />
+          </div>
+        ),
+        cell: ({ row }) => (
+          <div className="flex items-center pl-4">
+            <Checkbox
+              aria-label={`Select ${row.original.name}`}
+              checked={checked.has(row.original.name)}
+              onCheckedChange={(v) => onCheck(row.original.name, v === true)}
+            />
+          </div>
+        ),
+      },
+      {
         id: 'status',
         header: '',
         enableSorting: false,
         cell: ({ row }) => (
-          <div className="flex items-center pr-2 pl-4">
+          <div className="flex items-center px-2">
             {row.original.status === 'changed' ? (
               <ChangedBadge className={STATUS_PILL_WIDTH} />
             ) : row.original.status === 'deleted' ? (
@@ -176,7 +210,7 @@ export function FileTable({
         cell: ({ row }) => <div className="truncate pr-2 pl-4">{row.original.kind}</div>,
       },
     ],
-    [rows.length, now, lastSeenLabel, onSelect, onOpenFile, onEnterFolder],
+    [rows.length, now, lastSeenLabel, onSelect, onOpenFile, onEnterFolder, checked, checkedCount, onCheck, onCheckAll],
   )
 
   const table = useReactTable({
@@ -217,7 +251,9 @@ export function FileTable({
                         aria-sort={sorted ? (sorted === 'asc' ? 'ascending' : 'descending') : 'none'}
                         className={cn('h-7 px-2 text-xs', WIDTHS[h.id], h.id === 'kind' && 'pl-4')}
                       >
-                        {h.column.columnDef.enableSorting !== false && (
+                        {h.column.columnDef.enableSorting === false ? (
+                          flexRender(h.column.columnDef.header, h.getContext())
+                        ) : (
                           <button
                             type="button"
                             onClick={h.column.getToggleSortingHandler()}
@@ -242,7 +278,8 @@ export function FileTable({
               {skeleton
                 ? SKELETON.map(([w, k], i) => (
                     <TableRow key={i} className="h-[22px] border-0 hover:bg-transparent">
-                      <TableCell className="py-0 pl-4">
+                      <TableCell className="py-0" />
+                      <TableCell className="py-0 pl-2">
                         <EmptyBadge className={cn(STATUS_PILL_WIDTH, 'align-middle')} />
                       </TableCell>
                       <TableCell className="py-0">
@@ -291,13 +328,23 @@ export function FileTable({
       </ContextMenuTrigger>
       <ContextMenuContent className="min-w-52">
         {menuRow?.dir ? (
-          <ContextMenuItem onSelect={() => onEnterFolder(menuRow.name)}>
-            <FolderOpenIcon /> Open
-          </ContextMenuItem>
+          <>
+            <ContextMenuItem onSelect={() => onEnterFolder(menuRow.name)}>
+              <FolderOpenIcon /> Open
+            </ContextMenuItem>
+            <ContextMenuItem onSelect={() => onDownload(menuRow.name)}>
+              <DownloadIcon /> Download as zip
+            </ContextMenuItem>
+          </>
         ) : (
-          <ContextMenuItem onSelect={() => menuRow && onOpenFile(menuRow.name)}>
-            <HistoryIcon /> Show all versions
-          </ContextMenuItem>
+          <>
+            <ContextMenuItem onSelect={() => menuRow && onDownload(menuRow.name)}>
+              <DownloadIcon /> Download this version
+            </ContextMenuItem>
+            <ContextMenuItem onSelect={() => menuRow && onOpenFile(menuRow.name)}>
+              <HistoryIcon /> Show all versions
+            </ContextMenuItem>
+          </>
         )}
       </ContextMenuContent>
     </ContextMenu>

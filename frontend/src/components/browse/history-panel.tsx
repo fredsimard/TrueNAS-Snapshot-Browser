@@ -1,11 +1,11 @@
-import { XIcon } from 'lucide-react'
+import { DownloadIcon, XIcon } from 'lucide-react'
 
 import { FileIcon } from '@/components/browse/file-icon'
 import { ChangedBadge, DeletedBadge } from '@/components/browse/status-badge'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
-import type { History } from '@/lib/api'
+import type { History, Version } from '@/lib/api'
 import { formatSize, iconKind, kindOf, modifiedLabel } from '@/lib/format'
 import type { TimePoint } from '@/lib/timeline'
 import { cn } from '@/lib/utils'
@@ -19,6 +19,7 @@ export function HistoryPanel({
   selected,
   now,
   onClose,
+  onDownload,
 }: {
   name: string
   history: History | undefined
@@ -27,6 +28,7 @@ export function HistoryPanel({
   selected: number
   now: Date
   onClose: () => void
+  onDownload: (v: Version) => void
 }) {
   const kind = kindOf(name, false)
   const cur = points[selected]
@@ -105,11 +107,24 @@ export function HistoryPanel({
                         Viewing
                       </Badge>
                     )}
+                    {!v.current && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="ml-auto h-7 gap-1.5 px-2.5 text-[12.5px]"
+                        onClick={() => onDownload(v)}
+                      >
+                        <DownloadIcon className="size-3.5" /> Download
+                      </Button>
+                    )}
                   </div>
                   <div className="text-[12.5px] text-foreground/80">
                     {v.current ? `${formatSize(v.size)} · Modified ${modifiedLabel(v.mtime, now)}` : formatSize(v.size)}
                   </div>
                   {!v.current && <div className="text-xs text-muted-foreground">{range}</div>}
+                  {!v.current && (
+                    <div className="font-mono text-[11px] break-all text-muted-foreground">Saves as {v.saves_as}</div>
+                  )}
                 </div>
               )
             })}

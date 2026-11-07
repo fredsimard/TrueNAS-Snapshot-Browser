@@ -128,7 +128,7 @@ Requirements this imposes:
 - Single file → streamed to the browser with the original name, suffixed with the snapshot timestamp.
 - Folder → tar or zip stream generated on the fly, no temp staging on disk, so memory and pool usage stay flat regardless of size.
 - Enforce `max_download_bytes`; refuse oversized folder restores with a clear message rather than timing out.
-- Every restore logged: who, what path, which snapshot, when, bytes served.
+- Every restore logged: who, what path, which snapshot, when, bytes served. One line in the app's log (TrueNAS: Apps → the app → Logs), so all mounts stay read-only.
 
 ## 10. UI
 

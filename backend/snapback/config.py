@@ -19,6 +19,7 @@ import yaml
 DEFAULT_CONFIG_PATH = "/config/snapback.yaml"
 DEFAULT_LISTEN = "0.0.0.0:8080"
 DEFAULT_MAX_SNAPSHOTS_LISTED = 500
+DEFAULT_MAX_DOWNLOAD_GB = 20
 
 ROOT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 TOP_KEYS = {"server_label", "listen", "roots", "limits"}
@@ -64,6 +65,8 @@ class Config:
     timezone: ZoneInfo | None = None
     max_snapshots_listed: int = DEFAULT_MAX_SNAPSHOTS_LISTED
     snapshot_cache_seconds: float = 30.0
+    # Largest zip a user may download, in bytes of file contents. Single files have no limit.
+    max_download_bytes: int = DEFAULT_MAX_DOWNLOAD_GB * 10**9
 
 
 def load_config(environ: Mapping[str, str] = os.environ) -> Config:
@@ -71,6 +74,7 @@ def load_config(environ: Mapping[str, str] = os.environ) -> Config:
     smb_host = parse_smb_host(environ.get("SMB_HOST"))
     allowed_users = parse_allowed_users(environ.get("ALLOWED_USERS"))
     timezone = parse_timezone(environ.get("TZ"))
+    max_download_bytes = parse_max_download(environ.get("MAX_DOWNLOAD_GB"))
     path = environ.get("SNAPBACK_CONFIG") or DEFAULT_CONFIG_PATH
     try:
         with open(path, encoding="utf-8") as f:
@@ -79,7 +83,7 @@ def load_config(environ: Mapping[str, str] = os.environ) -> Config:
         raise ConfigError(f"config file not found: {path}") from None
     except yaml.YAMLError as e:
         raise ConfigError(f"{path}: invalid YAML: {e}") from None
-    return parse_config(raw, prefixes, timezone, smb_host, allowed_users)
+    return parse_config(raw, prefixes, timezone, smb_host, allowed_users, max_download_bytes)
 
 
 def parse_prefixes(raw: str | None) -> tuple[str, ...]:
@@ -118,6 +122,19 @@ def parse_allowed_users(raw: str | None) -> frozenset[str] | None:
     return frozenset(n.casefold() for n in names)
 
 
+def parse_max_download(raw: str | None) -> int:
+    text = (raw or "").strip()
+    if not text:
+        return DEFAULT_MAX_DOWNLOAD_GB * 10**9
+    try:
+        gb = float(text)
+    except ValueError:
+        gb = 0
+    if not 0 < gb < 10**6:
+        raise ConfigError(f"MAX_DOWNLOAD_GB: expected a positive number of gigabytes, got {raw!r}")
+    return int(gb * 10**9)
+
+
 def parse_timezone(raw: str | None) -> ZoneInfo | None:
     name = (raw or "").strip().lstrip(":")
     if not name:
@@ -134,6 +151,7 @@ def parse_config(
     timezone: ZoneInfo | None = None,
     smb_host: str = "",
     allowed_users: frozenset[str] | None = None,
+    max_download_bytes: int = DEFAULT_MAX_DOWNLOAD_GB * 10**9,
 ) -> Config:
     top = _mapping(raw, "config", TOP_KEYS)
 
@@ -168,6 +186,7 @@ def parse_config(
         allowed_users=allowed_users,
         timezone=timezone,
         max_snapshots_listed=max_listed,
+        max_download_bytes=max_download_bytes,
     )
 
 

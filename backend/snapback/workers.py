@@ -13,7 +13,9 @@ For each request, the supervisor looks the username up, forks, and the child dro
 web process gets the worker's end of a new socket pair. A worker exits when that socket closes: at
 sign-out, when the session expires, or when the web process dies.
 
-Messages on both channels are a 4-byte length and a JSON value.
+Messages on both channels are a 4-byte length and a JSON value. A worker's answer can carry one
+open file descriptor (a file or a pipe to download), passed with SCM_RIGHTS; the runner returns it
+as the answer's "fd", and the caller owns it.
 """
 
 from __future__ import annotations
@@ -149,10 +151,14 @@ def serve(sock: socket.socket, ops: Ops) -> None:
         if req is None:
             return
         reply = ops.handle(req) if isinstance(req, dict) else {"error": "bad_request"}
+        fd = reply.pop("fd", None)
         try:
-            send_msg(sock, reply)
+            send_msg(sock, reply, fd=fd)
         except (BrokenPipeError, ConnectionResetError):
             return  # the web process gave up on this request
+        finally:
+            if fd is not None:
+                os.close(fd)
 
 
 def _close_fds_except(keep: int) -> None:
@@ -314,7 +320,7 @@ class WorkerPool:
         try:
             sock.settimeout(REQUEST_TIMEOUT_SECONDS)
             send_msg(sock, req)
-            reply, _ = recv_msg(sock)
+            reply, fd = recv_msg(sock, want_fd=True)
         except (OSError, ProtocolError, ValueError) as e:
             self._discard(sock)
             raise WorkerUnavailable(f"worker: {type(e).__name__}") from None
@@ -322,9 +328,13 @@ class WorkerPool:
             self._discard(sock)
             raise
         if not isinstance(reply, dict):
+            if fd is not None:
+                os.close(fd)
             self._discard(sock)
             raise WorkerUnavailable("worker exited")
         self._release(sock)
+        if fd is not None:
+            reply["fd"] = fd
         return reply
 
     def _acquire(self) -> socket.socket:
@@ -403,7 +413,12 @@ class _InProcessRunner:
         if self.closed:
             raise WorkerUnavailable("session ended")
         # Through JSON, like the real thing.
-        return json.loads(json.dumps(self._ops.handle(json.loads(json.dumps(req)))))
+        reply = self._ops.handle(json.loads(json.dumps(req)))
+        fd = reply.pop("fd", None)
+        reply = json.loads(json.dumps(reply))
+        if fd is not None:
+            reply["fd"] = fd
+        return reply
 
     def close(self) -> None:
         self.closed = True

@@ -40,11 +40,31 @@ export interface Folder {
 export interface Version extends Values {
   current: boolean
   points: string[]
+  saves_as: string // file name a download of this version gets
 }
 
 export interface History {
   now: Values | null
   versions: Version[] // newest first
+}
+
+export type DownloadPlan =
+  | { too_large: true; limit: number }
+  | {
+      too_large: false
+      id: string
+      kind: 'file' | 'zip'
+      name: string // file name it saves as
+      bytes: number // of file contents
+      files: number
+      folders: number
+      limit: number
+    }
+
+export interface DownloadProgress {
+  state: 'ready' | 'running' | 'done' | 'failed' | 'cancelled'
+  sent: number
+  total: number
 }
 
 export class ApiError extends Error {
@@ -98,4 +118,12 @@ export const api = {
     get<Folder>(`${root(rootId)}/folder?${new URLSearchParams({ path, at })}`, signal),
   history: (rootId: string, path: string, signal?: AbortSignal) =>
     get<History>(`${root(rootId)}/history?${new URLSearchParams({ path })}`, signal),
+  /** Size and name of names (items in the folder at path), before anything is sent. */
+  prepareDownload: (rootId: string, path: string, at: string, names: string[]) =>
+    post<DownloadPlan>(`${root(rootId)}/downloads`, { path, at, names }),
+  /** Fetched once, by the browser, as an ordinary download. */
+  downloadUrl: (id: string) => `/api/downloads/${encodeURIComponent(id)}`,
+  downloadProgress: (id: string) => get<DownloadProgress>(`/api/downloads/${encodeURIComponent(id)}/progress`),
+  cancelDownload: (id: string) =>
+    fetch(`/api/downloads/${encodeURIComponent(id)}`, { method: 'DELETE' }).then(parse<{ state: string }>),
 }

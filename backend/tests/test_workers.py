@@ -44,6 +44,11 @@ class EchoOps:
             time.sleep(req["seconds"])
         if req.get("op") == "exit":
             os._exit(0)
+        if req.get("op") == "pipe":
+            r, w = os.pipe()
+            os.write(w, b"from the worker")
+            os.close(w)
+            return {"ok": {}, "fd": r}
         open_fds = []
         for fd in range(3, 256):
             try:
@@ -222,3 +227,10 @@ def test_supervisor_gone(supervisor):
     os.waitpid(state["pid"], 0)
     with pytest.raises(WorkerUnavailable):
         backend.start("alice")
+
+
+def test_a_workers_descriptor_reaches_the_web_process(supervisor):
+    backend, _ = supervisor
+    reply = backend.start("alice").call({"op": "pipe"})
+    assert os.read(reply["fd"], 100) == b"from the worker"
+    os.close(reply["fd"])

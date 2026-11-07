@@ -17,6 +17,7 @@ services:
       # Required. "all", or comma-separated usernames allowed to use the app.
       ALLOWED_USERS: "all"
       TZ: America/Toronto  # example: set the server's timezone; snapshot names are read in it
+      MAX_DOWNLOAD_GB: "20"  # largest zip one download may hold
       SNAPBACK_CONFIG: /config/snapback.yaml
     ports:
       - "18080:8080"

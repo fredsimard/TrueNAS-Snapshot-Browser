@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { SortingState } from '@tanstack/react-table'
+import { DownloadIcon } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { AppHeader } from '@/components/app-header'
@@ -15,6 +16,8 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from '@/components/ui/breadcrumb'
+import { Button } from '@/components/ui/button'
+import { useDownloads } from '@/hooks/use-downloads'
 import { useNow } from '@/hooks/use-now'
 import { useRequest } from '@/hooks/use-request'
 import { api, ApiError, NOW, type Info } from '@/lib/api'
@@ -91,6 +94,12 @@ export function BrowsePage({
   const selectedRow = selectedName?.path === path ? selectedName.name : null
   const openName = openFile?.path === path ? openFile.name : null
 
+  // Checked rows, for downloading several at once. Kept per folder; a name that isn't in the
+  // listing at the current point in time (or under the current filter) doesn't count.
+  const [checkedIn, setCheckedIn] = useState<{ path: string; names: Set<string> }>({ path, names: new Set() })
+  const checkedAll = checkedIn.path === path ? checkedIn.names : EMPTY
+  const { request: requestDownload, dialogs: downloadDialogs } = useDownloads()
+
   const historyKey = openName ? `${rootId}\n${path ? `${path}/` : ''}${openName}` : null
   const historyReq = useRequest(historyKey, (s) => api.history(rootId, `${path ? `${path}/` : ''}${openName}`, s))
 
@@ -109,6 +118,30 @@ export function BrowsePage({
     () => sortRows(effFilter === 'all' ? all : all.filter((r) => r.status === effFilter), sorting),
     [all, effFilter, sorting],
   )
+
+  const checked = useMemo(() => new Set(shown.filter((r) => checkedAll.has(r.name)).map((r) => r.name)), [shown, checkedAll])
+  const onCheck = useCallback(
+    (name: string, on: boolean) =>
+      setCheckedIn((c) => {
+        const names = new Set(c.path === path ? c.names : [])
+        if (on) names.add(name)
+        else names.delete(name)
+        return { path, names }
+      }),
+    [path],
+  )
+  const onCheckAll = useCallback(
+    (on: boolean) => setCheckedIn({ path, names: new Set(on ? shown.map((r) => r.name) : []) }),
+    [path, shown],
+  )
+  const download = useCallback(
+    (names: string[]) => {
+      const file = names.length === 1 && all.some((r) => r.name === names[0] && !r.dir)
+      requestDownload({ rootId, path, at, names }, { file })
+    },
+    [requestDownload, rootId, path, at, all],
+  )
+  const downloadOne = useCallback((name: string) => download([name]), [download])
 
   const enterFolder = useCallback(
     (name: string) => navigate(routeHref(rootId, [...parts, name], at)),
@@ -238,6 +271,10 @@ export function BrowsePage({
       onSelect: selectRow,
       onOpenFile: showHistory,
       onEnterFolder: enterFolder,
+      checked,
+      onCheck,
+      onCheckAll,
+      onDownload: downloadOne,
     }
   }
 
@@ -313,9 +350,21 @@ export function BrowsePage({
               </Breadcrumb>
             </div>
             <div className="relative mt-6 flex min-h-0 grow flex-col overflow-hidden rounded-lg border">{body}</div>
-            <p className="mt-3 h-[18px] shrink-0 px-1 text-[12.5px] text-muted-foreground tabular-nums" aria-live="polite">
-              {total}
-            </p>
+            {checked.size > 0 && total ? (
+              <div className="mt-3 flex h-9 shrink-0 items-center gap-3 px-1 text-[12.5px]">
+                <span className="tabular-nums" aria-live="polite">
+                  {checked.size.toLocaleString('en-US')} selected
+                </span>
+                <span className="text-muted-foreground tabular-nums">of {total}</span>
+                <Button size="sm" className="ml-auto h-8 gap-1.5" onClick={() => download([...checked])}>
+                  <DownloadIcon /> Download
+                </Button>
+              </div>
+            ) : (
+              <p className="mt-3 h-[18px] shrink-0 px-1 text-[12.5px] text-muted-foreground tabular-nums" aria-live="polite">
+                {total}
+              </p>
+            )}
           </div>
           {openName && points && cur && (
             <HistoryPanel
@@ -326,10 +375,16 @@ export function BrowsePage({
               selected={selected}
               now={now}
               onClose={() => setOpenFile(null)}
+              onDownload={(v) =>
+                requestDownload({ rootId, path, at: v.points[v.points.length - 1], names: [openName] }, { file: true })
+              }
             />
           )}
         </div>
       </div>
+      {downloadDialogs}
     </div>
   )
 }
+
+const EMPTY: ReadonlySet<string> = new Set()
