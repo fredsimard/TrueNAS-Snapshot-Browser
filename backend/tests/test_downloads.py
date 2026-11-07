@@ -2,6 +2,7 @@ import asyncio
 import io
 import logging
 import os
+import threading
 import zipfile
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -15,6 +16,7 @@ from snapback.api import create_app
 from snapback.config import Config, RootConfig
 from snapback.downloads import TooLarge, download_name, plan_zip, start_zip, zip_complete
 from snapback.ops import Ops
+from snapback.paths import Missing
 from snapback.transfer import DownloadAborted, content_disposition
 from snapback.workers import InProcessBackend
 
@@ -80,6 +82,28 @@ def test_plan_stops_early_when_too_large(tree, monkeypatch):
     monkeypatch.setattr(downloads, "MAX_ZIP_ENTRIES", 2)
     with pytest.raises(TooLarge):
         plan_zip(tree, (), ["Job"], 10**9)
+
+
+def test_a_fifo_is_refused_without_waiting_for_a_writer(tmp_path):
+    os.mkfifo(tmp_path / "pipe")
+    (tmp_path / "file").write_bytes(b"abc")
+    outcome = []
+
+    def run():
+        try:
+            downloads.open_file(str(tmp_path), ("pipe",))
+        except Missing:
+            outcome.append("missing")
+
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+    t.join(5)
+    assert outcome == ["missing"]  # still blocked in open() otherwise
+    fd, st = downloads.open_file(str(tmp_path), ("file",))
+    try:
+        assert os.get_blocking(fd) and os.read(fd, 10) == b"abc" and st.st_size == 3
+    finally:
+        os.close(fd)
 
 
 def test_zip_contents(tree):
