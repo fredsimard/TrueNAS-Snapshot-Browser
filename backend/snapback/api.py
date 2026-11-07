@@ -16,7 +16,7 @@ from functools import partial
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.datastructures import MutableHeaders
@@ -34,7 +34,15 @@ from .auth import (
 )
 from .config import Config
 from .ops import ERROR_STATUS, MAX_NAMES
-from .transfer import MAX_RUNNING_PER_SESSION, Download, DownloadAborted, body, content_disposition, log_end, prune
+from .transfer import (
+    MAX_RUNNING_PER_SESSION,
+    Download,
+    DownloadAborted,
+    DownloadResponse,
+    content_disposition,
+    log_end,
+    prune,
+)
 from .workers import Backend, WorkerUnavailable
 
 log = logging.getLogger(__name__)
@@ -233,13 +241,15 @@ def create_app(
         if plan["too_large"]:
             return {"too_large": True, "limit": plan["limit"]}
         if plan["kind"] == "file":
-            path = "/".join(p for p in (body_.path.strip("/"), body_.names[0]) if p)
+            # The plan skips names that are gone or unreadable, so the file is the one it found.
+            path = "/".join(p for p in (body_.path.strip("/"), plan["item"]) if p)
             req = {"op": "file", "root": root_id, "path": path, "at": body_.at}
         else:
             req = {"op": "zip", "root": root_id, "path": body_.path, "at": body_.at, "names": body_.names}
-        prune(session.downloads)
         d = Download(secrets.token_urlsafe(16), session.username, req, plan["kind"], plan["name"], plan["bytes"])
-        session.downloads[d.id] = d
+        with session.lock:
+            prune(session.downloads)
+            session.downloads[d.id] = d
         keys = ("kind", "name", "bytes", "files", "folders", "limit")
         return {"id": d.id, "too_large": False, **{k: plan[k] for k in keys}}
 
@@ -250,14 +260,17 @@ def create_app(
         # the page learns what happened from /progress.
         nothing = Response(status_code=204)
         session = sessions.get(request.cookies.get(SESSION_COOKIE))
-        d = session.downloads.get(dl_id) if session else None
-        if d is None or d.state != "ready":
+        if session is None:
             return nothing
-        if sum(x.state == "running" for x in session.downloads.values()) >= MAX_RUNNING_PER_SESSION:
-            d.state = "failed"
+        with session.lock:  # concurrent requests must not start one download twice, or too many
+            d = session.downloads.get(dl_id)
+            if d is None or d.state != "ready":
+                return nothing
+            too_many = sum(x.state == "running" for x in session.downloads.values()) >= MAX_RUNNING_PER_SESSION
+            d.state = "failed" if too_many else "running"
+        if too_many:
             log_end(d, "too many at once")
             return nothing
-        d.state = "running"
         try:
             reply = call(session, d.req)
         except HTTPException as e:
@@ -269,8 +282,8 @@ def create_app(
         headers = {"Content-Disposition": content_disposition(d.name)}
         if d.kind == "file":
             headers["Content-Length"] = str(d.total)
-            return StreamingResponse(body(d, fd, d.total), headers=headers, media_type="application/octet-stream")
-        return StreamingResponse(body(d, fd, None), headers=headers, media_type="application/zip")
+            return DownloadResponse(d, fd, d.total, headers=headers, media_type="application/octet-stream")
+        return DownloadResponse(d, fd, None, headers=headers, media_type="application/zip")
 
     @app.get("/api/downloads/{dl_id}/progress")
     def download_progress(dl_id: str, session: UserSession = Depends(signed_in)) -> dict:
@@ -280,8 +293,9 @@ def create_app(
     @app.delete("/api/downloads/{dl_id}")
     def cancel_download(dl_id: str, session: UserSession = Depends(signed_in)) -> dict:
         d = get_download(dl_id, session)
-        if not d.finished:
-            d.state = "cancelled"  # a running one stops at its next chunk
+        with session.lock:
+            if not d.finished:
+                d.state = "cancelled"  # a running one stops at its next chunk
         return {"state": d.state}
 
     if static_dir and os.path.isfile(os.path.join(static_dir, "index.html")):

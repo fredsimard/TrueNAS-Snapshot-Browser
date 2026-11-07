@@ -1,9 +1,11 @@
+import time
+
 import pytest
 
 from snapback import browse
 from snapback.browse import Timeline, file_history, list_folder, nearest
 from snapback.config import RootConfig
-from snapback.paths import resolve_root
+from snapback.paths import observe_file, resolve_root
 from snapback.snapshots import SnapshotIndex
 
 DAY = 86_400
@@ -108,6 +110,38 @@ def test_history_of_deleted_file(tl):
     h = file_history(tl, ("gone.txt",))
     assert h.now is None
     assert [(v.points, v.current) for v in h.versions] == [([0, 1, 2, 3, 4, 5], False)]
+
+
+def test_history_of_a_file_in_a_folder_that_came_and_went(ds):
+    # The folder is missing at the oldest point and at Now, so only the points between hold the file.
+    old, new = ds.blob(b"one", T0), ds.blob(b"three", T0 + 3 * DAY)
+    names = [f"auto-2026-09-{d:02d}_00-00" for d in range(20, 26)]
+    for i, name in enumerate(names):
+        files = {"S/keep.txt": old}
+        if 1 <= i <= 3:
+            files["S/Temp/doc.txt"] = old if i < 3 else new
+        ds.populate(name, files)
+    ds.populate(None, {"S/keep.txt": old})
+    root = resolve_root(RootConfig("s", "S", str(ds.mountpoint / "S")))
+    timeline = Timeline(root, SnapshotIndex(("auto-",), 500, 30, None).list(root.snapshot_dir))
+
+    h = file_history(timeline, ("Temp", "doc.txt"))
+    assert h.now is None
+    assert [(v.entry.size, v.points) for v in h.versions] == [(5, [3]), (3, [1, 2])]
+
+
+def test_a_missing_folder_is_told_apart_by_the_folder_above_it(tmp_path):
+    # Two points that both lack Temp/ look the same unless something shows that Temp/ came and went.
+    (tmp_path / "S").mkdir()
+    before = observe_file(str(tmp_path), ("S", "Temp", "doc.txt"))
+    time.sleep(0.05)
+    (tmp_path / "S" / "Temp").mkdir()
+    time.sleep(0.05)
+    (tmp_path / "S" / "Temp").rmdir()
+    after = observe_file(str(tmp_path), ("S", "Temp", "doc.txt"))
+    assert before[0] is None and after[0] is None
+    assert before[1] != after[1]
+    assert after[1] == observe_file(str(tmp_path), ("S", "Temp", "doc.txt"))[1]  # stable when nothing changes
 
 
 def test_history_skips_unchanged_ranges(tl, monkeypatch):

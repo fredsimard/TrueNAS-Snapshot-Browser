@@ -273,6 +273,22 @@ def observe_file(base: str, parts: Sequence[str]) -> tuple[Entry | None, tuple]:
             pst = os.fstat(fd)
             return None, ("absent", pst.st_ino, pst.st_ctime_ns)
     except Missing:
-        return None, ("absent",)
+        return None, _missing_folder_key(base, parent)
     except Denied:
         return None, ("denied",)
+
+
+def _missing_folder_key(base: str, parent: Sequence[str]) -> tuple:
+    """Key for a file whose parent folder doesn't exist: the identity of the closest folder above it
+    that does. Creating or removing the missing folder changes that folder's ctime, so two points
+    that both lack it compare equal only if it didn't come and go in between."""
+    for depth in range(len(parent) - 1, -1, -1):
+        try:
+            with opened_dir(base, parent[:depth]) as fd:
+                st = os.fstat(fd)
+                return ("absent", st.st_ino, st.st_ctime_ns)
+        except Missing:
+            continue
+        except Denied:
+            return ("denied",)
+    return ("absent",)

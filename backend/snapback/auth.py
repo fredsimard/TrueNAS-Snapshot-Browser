@@ -115,6 +115,7 @@ class UserSession:
     expires: float
     workers: Closable | None = None  # reads files as this account (workers.Runner)
     downloads: dict = field(default_factory=dict)  # id → transfer.Download
+    lock: threading.Lock = field(default_factory=threading.Lock, repr=False)  # guards downloads' states
 
 
 class SessionStore:

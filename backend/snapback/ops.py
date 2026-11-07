@@ -163,8 +163,8 @@ class Ops:
         if not start and len(top) == 1 and not top[0].is_dir:
             only = top[0]
             name = download_name(only.arc[0], local_time(only.mtime_ns, self.tz))
-            return {"kind": "file", "name": name, "bytes": only.size, "files": 1, "folders": 0,
-                    "too_large": False, "limit": self.max_download_bytes}
+            return {"kind": "file", "name": name, "item": only.arc[0], "bytes": only.size, "files": 1,
+                    "folders": 0, "too_large": False, "limit": self.max_download_bytes}
         label = top[0].arc[0] if len(top) == 1 else (folder[-1] if folder else tl.root.label)
         name = download_name(f"{label}.zip", self._point_time(tl, at))
         summary = {"kind": "zip", "name": name, "bytes": plan.bytes, "files": plan.files,
