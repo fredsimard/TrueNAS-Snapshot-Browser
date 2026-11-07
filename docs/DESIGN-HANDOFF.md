@@ -21,7 +21,7 @@ All data in the mockups is made up: server "Studio Server", the shares, the file
 
 ## Theme
 
-- shadcn/ui `new-york`, base colour `zinc`, light + dark following the system setting.
+- shadcn/ui `new-york`, base colour `zinc`, light + dark. Follows the system setting by default; a header button offers System, Light and Dark.
 - Font: Geist (UI) and Geist Mono (download file names, Kbd).
 - Status colours: add these as theme tokens in `globals.css` (light / dark). Never hardcode them in components.
 
@@ -32,6 +32,7 @@ All data in the mockups is made up: server "Studio Server", the shares, the file
 | `--status-changed` | `#15803d` | `#4ade80` | changed row text, Changed badge text/border, differing-value dot, filter dot |
 | `--status-changed-bg` | `#f0fdf4` | `#052e16` | Changed badge background |
 | `--timeline-selected` | `#2563eb` | `#3b82f6` | selected point marker, band from selected point to Now |
+| `--timeline-track` | `#e7e7ea` | `#29292d` | panel behind the timeline, so its start and end are visible |
 
 - Unchanged rows use `--foreground` for every column (no grey columns).
 - Red is used for deleted items and for the failed sign-in Alert. Nothing else is red.
@@ -48,7 +49,7 @@ All data in the mockups is made up: server "Studio Server", the shares, the file
   - Row 2: the timeline, 50 px.
 - Listing: `Data Table`. Header 28 px, rows 22 px, no row borders, 13 px text.
   - Columns: checkbox 40 · Name (flex) · Date Modified 224 · Size 96 (right-aligned) · Kind 208.
-- Footer 36 px: item count ("N items · as of <label>", or "N of M" when filtered). When items are selected: "N selected" and a Download button.
+- No footer: the item count duplicated the filter chips and the date duplicated the time section (removed after testing). When items are selected, a 36 px bar appears below the listing with "N selected" and a Download button.
 - File detail `Sheet`: 384 px, docked on the right. It pushes the listing narrower instead of overlaying it: no overlay, non-modal. It opens for files only.
 
 ## Timeline
@@ -115,7 +116,7 @@ Each row compares the item's state at the selected point with its state now.
 | Empty then | This folder was empty then | As of <label>, <folder> existed but had nothing in it. Try a later time. | Step forward in time |
 | No permission | This folder isn’t available to you | Your account can’t open it. If you need something from it, ask IT. | none |
 | Empty share | Nothing here | <share> had no files as of <label>. (At Now: "<share> has no files right now.") | none |
-| Loading | skeleton rows under the table header; footer "Loading this folder as of <label>…" | | |
+| Loading | skeleton rows under the table header | | |
 
 ## Not designed yet
 

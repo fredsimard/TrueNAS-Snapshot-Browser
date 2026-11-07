@@ -165,7 +165,7 @@ def main() -> int:
         f"  - id: scratch\n    share_root: {dataset / 'Scratch'}\n"
     )
     print(f"{len(points)} snapshots in {dataset}")
-    print(f"SNAPSHOT_PREFIXES=auto- SNAPBACK_CONFIG={out / 'snapback.yaml'} python -m snapback")
+    print(f"SNAPSHOT_PREFIXES=auto- SNAPBACK_CONFIG={out / 'snapback.yaml'} python scripts/dev_server.py")
     return 0
 
 

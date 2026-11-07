@@ -26,7 +26,9 @@ def setup(ds, tmp_path):
     (static / "assets").mkdir(parents=True)
     (static / "index.html").write_text("<!doctype html><title>app</title>")
     (static / "assets" / "app.js").write_text("console.log(1)")
-    return TestClient(create_app(config, str(static))), str(tmp_path)
+    client = TestClient(create_app(config, str(static), verify=lambda u, p: True))
+    assert client.post("/api/login", json={"username": "alice", "password": "pw"}).status_code == 200
+    return client, str(tmp_path)
 
 
 def no_leaks(text: str, tmp: str):
@@ -39,6 +41,7 @@ def test_info(setup):
     client, _ = setup
     assert client.get("/api/info").json() == {
         "server_label": "NAS01",
+        "user": "alice",
         "roots": [{"id": "projects", "label": "Projects"}],
     }
 

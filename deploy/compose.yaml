@@ -1,24 +1,26 @@
-# TrueNAS custom app ("Install via YAML"). Phases 1-2: no sign-in yet, so the port is bound to
-# the NAS's localhost only; reach it with an SSH tunnel (see README).
+# TrueNAS custom app: paste into "Install via YAML" in the Apps screen. The Custom App wizard can't
+# set mount propagation, and without rslave snapshots appear empty.
 services:
   snapback:
-    image: REGISTRY/snapback:TAG  # placeholder: no image is published yet
-    restart: unless-stopped
+    # Loaded on the NAS with `docker load`; never pulled from a registry.
+    image: snapback:dev
+    pull_policy: never
     environment:
-      # Required. Comma-separated snapshot name prefixes users may see. The app refuses to
-      # start when this is empty.
+      # Required. Comma-separated snapshot name prefixes users may see.
       SNAPSHOT_PREFIXES: "auto-"
+      # Required. The NAS's network address, used to check passwords. Not 127.0.0.1: inside the
+      # container that's the container itself.
+      SMB_HOST: "192.0.2.10"
       TZ: America/Toronto  # example: set the server's timezone; snapshot names are read in it
       SNAPBACK_CONFIG: /config/snapback.yaml
     ports:
-      - "127.0.0.1:8080:8080"
+      - "18080:8080"
     volumes:
       - type: bind
-        source: /mnt/POOL/apps/snapback/snapback.yaml
+        source: /mnt/tank/apps/snapback/snapback.yaml
         target: /config/snapback.yaml
         read_only: true
       # One per distinct dataset mountpoint, same path inside and outside, read-only.
-      # rslave lets snapshots automounted after start appear inside (see spike/).
       - type: bind
         source: /mnt/tank/studio
         target: /mnt/tank/studio

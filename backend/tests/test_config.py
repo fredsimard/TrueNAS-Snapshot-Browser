@@ -1,6 +1,13 @@
 import pytest
 
-from snapback.config import ConfigError, load_config, parse_config, parse_prefixes, parse_timezone
+from snapback.config import (
+    ConfigError,
+    load_config,
+    parse_config,
+    parse_prefixes,
+    parse_smb_host,
+    parse_timezone,
+)
 
 MINIMAL = {"server_label": "NAS01", "roots": [{"id": "projects", "share_root": "/mnt/tank/studio/Projects"}]}
 
@@ -28,15 +35,32 @@ def test_load_config_checks_prefixes_before_reading_file(tmp_path):
 def test_load_config(tmp_path):
     p = tmp_path / "c.yaml"
     p.write_text("server_label: X\nroots:\n  - id: a\n    share_root: /mnt/a/b\n")
-    cfg = load_config({"SNAPBACK_CONFIG": str(p), "SNAPSHOT_PREFIXES": "auto-", "TZ": "America/Toronto"})
+    cfg = load_config(
+        {"SNAPBACK_CONFIG": str(p), "SNAPSHOT_PREFIXES": "auto-", "SMB_HOST": "192.0.2.10", "TZ": "America/Toronto"}
+    )
     assert cfg.snapshot_prefixes == ("auto-",)
+    assert cfg.smb_host == "192.0.2.10"
     assert cfg.timezone.key == "America/Toronto"
     assert (cfg.host, cfg.port) == ("0.0.0.0", 8080)
 
 
 def test_missing_file(tmp_path):
     with pytest.raises(ConfigError, match="not found"):
-        load_config({"SNAPBACK_CONFIG": str(tmp_path / "nope.yaml"), "SNAPSHOT_PREFIXES": "auto-"})
+        load_config(
+            {"SNAPBACK_CONFIG": str(tmp_path / "nope.yaml"), "SNAPSHOT_PREFIXES": "auto-", "SMB_HOST": "192.0.2.10"}
+        )
+
+
+@pytest.mark.parametrize("raw", [None, "", "  "])
+def test_smb_host_required(raw):
+    with pytest.raises(ConfigError, match="SMB_HOST is required"):
+        parse_smb_host(raw)
+
+
+@pytest.mark.parametrize("raw", ["127.0.0.1", "127.1.2.3", "localhost", "::1"])
+def test_smb_host_cannot_be_the_container(raw):
+    with pytest.raises(ConfigError, match="localhost is the container"):
+        parse_smb_host(raw)
 
 
 def test_label_defaults_to_share_folder_name():

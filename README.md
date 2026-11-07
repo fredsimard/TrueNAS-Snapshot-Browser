@@ -8,17 +8,14 @@ their share by folder and by time, and see what changed or was deleted. Plan and
 
 | Phase | |
 |---|---|
-| 0: automount spike | Written, not yet run on TrueNAS: [spike/README.md](spike/README.md). **Gate for everything else.** |
-| 1–2: read-only browser, config, multi-root | Done, tested against a simulated `.zfs` tree |
-| 3–7: sign-in, privilege drop, downloads, AD, packaging | Not started |
+| 0: automount spike | Passed on TrueNAS: [spike/README.md](spike/README.md) |
+| 1–2: read-only browser, config, multi-root | Done, checked on real snapshots |
+| 3: sign-in | Built; the SMB check passed on TrueNAS, the app's sign-in hasn't run there yet |
+| 4–7: per-user permissions, downloads, AD, packaging | Not started |
 
-Without sign-in, the app is for the administrator only. [deploy/compose.yaml](deploy/compose.yaml)
-binds it to the NAS's localhost; reach it through an SSH tunnel, then open http://localhost:8080.
-It runs as root in the container, so it can read everything under the mounted datasets.
-
-```bash
-ssh -N -L 8080:127.0.0.1:8080 root@NAS
-```
+**Not ready for staff yet.** Sign-in proves who someone is, but until Phase 4 every signed-in user sees
+everything under the mounted datasets, because the app runs as root in the container. The app also serves plain
+HTTP, so passwords cross the LAN unencrypted unless a TLS reverse proxy sits in front of it.
 
 ## Layout
 
@@ -37,6 +34,7 @@ Environment (set at app creation):
 | Variable | |
 |---|---|
 | `SNAPSHOT_PREFIXES` | **Required.** Comma-separated snapshot name prefixes users may see, e.g. `auto-,daily-`. The app refuses to start without it. |
+| `SMB_HOST` | **Required.** The NAS's network address. Sign-in checks passwords by opening an SMB session to it. `127.0.0.1` is refused: in the container that's the container itself. |
 | `TZ` | Timezone the timestamps in snapshot names are written in. Defaults to the container's local time. |
 | `SNAPBACK_CONFIG` | Config file path. Default `/config/snapback.yaml`. |
 
@@ -58,14 +56,14 @@ backend/.venv/bin/python backend/scripts/make_demo.py dev/demo
 ```
 
 ```bash
-cd backend && SNAPSHOT_PREFIXES=auto- SNAPBACK_CONFIG=../dev/demo/snapback.yaml .venv/bin/python -m snapback
+cd backend && SNAPSHOT_PREFIXES=auto- SNAPBACK_CONFIG=../dev/demo/snapback.yaml .venv/bin/python scripts/dev_server.py
 ```
 
 ```bash
 cd frontend && npm install && npm run dev
 ```
 
-The Vite dev server on :5173 proxies `/api` to :8080. Tests:
+The Vite dev server on :5173 proxies `/api` to :8080. Sign in with `demo` / `demo`; `dev_server.py` replaces the SMB check. Tests:
 
 ```bash
 cd backend && .venv/bin/pytest
@@ -77,3 +75,4 @@ cd backend && .venv/bin/pytest
 - Hidden entries (names starting with `.`) are never listed or reachable, as in Finder.
 - Symlinks are not listed or followed.
 - Snapshots taken at the same minute by different tasks show as one point in time.
+- Sessions live in memory: restarting the app signs everyone out.

@@ -1,7 +1,7 @@
 """Configuration: one YAML file per server, plus environment variables set at app creation.
 
-SNAPSHOT_PREFIXES is mandatory. The app refuses to start without it, so users never see an
-unfiltered snapshot list.
+SNAPSHOT_PREFIXES and SMB_HOST are mandatory. Without the first, users could see an unfiltered
+snapshot list; without the second, nobody can sign in. The app refuses to start without them.
 """
 
 from __future__ import annotations
@@ -44,6 +44,8 @@ class Config:
     port: int
     roots: tuple[RootConfig, ...]
     snapshot_prefixes: tuple[str, ...]
+    # Where sign-in sends credentials. 127.0.0.1 would be the container itself.
+    smb_host: str = ""
     # Timezone that timestamps in snapshot names are written in. None: the system's local time.
     timezone: ZoneInfo | None = None
     max_snapshots_listed: int = DEFAULT_MAX_SNAPSHOTS_LISTED
@@ -52,6 +54,7 @@ class Config:
 
 def load_config(environ: Mapping[str, str] = os.environ) -> Config:
     prefixes = parse_prefixes(environ.get("SNAPSHOT_PREFIXES"))
+    smb_host = parse_smb_host(environ.get("SMB_HOST"))
     timezone = parse_timezone(environ.get("TZ"))
     path = environ.get("SNAPBACK_CONFIG") or DEFAULT_CONFIG_PATH
     try:
@@ -61,7 +64,7 @@ def load_config(environ: Mapping[str, str] = os.environ) -> Config:
         raise ConfigError(f"config file not found: {path}") from None
     except yaml.YAMLError as e:
         raise ConfigError(f"{path}: invalid YAML: {e}") from None
-    return parse_config(raw, prefixes, timezone)
+    return parse_config(raw, prefixes, timezone, smb_host)
 
 
 def parse_prefixes(raw: str | None) -> tuple[str, ...]:
@@ -77,6 +80,15 @@ def parse_prefixes(raw: str | None) -> tuple[str, ...]:
     return prefixes
 
 
+def parse_smb_host(raw: str | None) -> str:
+    host = (raw or "").strip()
+    if not host:
+        raise ConfigError("SMB_HOST is required: the NAS's address, used to check passwords at sign-in.")
+    if host in ("localhost", "::1") or host.startswith("127."):
+        raise ConfigError("SMB_HOST: must be the NAS's network address; localhost is the container itself.")
+    return host
+
+
 def parse_timezone(raw: str | None) -> ZoneInfo | None:
     name = (raw or "").strip().lstrip(":")
     if not name:
@@ -87,7 +99,9 @@ def parse_timezone(raw: str | None) -> ZoneInfo | None:
         raise ConfigError(f"TZ: unknown timezone {raw!r}") from None
 
 
-def parse_config(raw: object, prefixes: tuple[str, ...], timezone: ZoneInfo | None = None) -> Config:
+def parse_config(
+    raw: object, prefixes: tuple[str, ...], timezone: ZoneInfo | None = None, smb_host: str = ""
+) -> Config:
     top = _mapping(raw, "config", TOP_KEYS)
 
     server_label = top.get("server_label")
@@ -117,6 +131,7 @@ def parse_config(raw: object, prefixes: tuple[str, ...], timezone: ZoneInfo | No
         port=port,
         roots=roots,
         snapshot_prefixes=prefixes,
+        smb_host=smb_host,
         timezone=timezone,
         max_snapshots_listed=max_listed,
     )

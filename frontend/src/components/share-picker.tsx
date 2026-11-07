@@ -10,7 +10,7 @@ export function SharePicker({ info }: { info: Info }) {
   const onLink = useLinkHandler()
   return (
     <div className="flex h-dvh flex-col bg-subtle">
-      <AppHeader serverLabel={info.server_label} />
+      <AppHeader serverLabel={info.server_label} user={info.user} />
       <main className="flex grow justify-center px-4 pt-[min(160px,15vh)]">
         <div className="flex w-full max-w-100 flex-col gap-4">
           <div className="flex flex-col gap-1">

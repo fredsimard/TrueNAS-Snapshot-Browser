@@ -2,8 +2,12 @@
 
 export const NOW = 'now'
 
+/** Fired when the server says the session is gone, or the user signs out. */
+export const SIGNED_OUT_EVENT = 'snapback:signed-out'
+
 export interface Info {
   server_label: string
+  user: string | null
   roots: { id: string; label: string }[]
 }
 
@@ -54,8 +58,7 @@ export class ApiError extends Error {
   }
 }
 
-async function get<T>(url: string, signal?: AbortSignal): Promise<T> {
-  const res = await fetch(url, { signal, headers: { Accept: 'application/json' } })
+async function parse<T>(res: Response): Promise<T> {
   if (!res.ok) {
     let code = 'http_' + res.status
     try {
@@ -68,10 +71,27 @@ async function get<T>(url: string, signal?: AbortSignal): Promise<T> {
   return res.json() as Promise<T>
 }
 
+async function get<T>(url: string, signal?: AbortSignal): Promise<T> {
+  const res = await fetch(url, { signal, headers: { Accept: 'application/json' } })
+  if (res.status === 401) window.dispatchEvent(new Event(SIGNED_OUT_EVENT))
+  return parse<T>(res)
+}
+
+async function post<T>(url: string, body: unknown): Promise<T> {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  return parse<T>(res)
+}
+
 const root = (id: string) => `/api/roots/${encodeURIComponent(id)}`
 
 export const api = {
   info: (signal?: AbortSignal) => get<Info>('/api/info', signal),
+  login: (username: string, password: string) => post<{ user: string }>('/api/login', { username, password }),
+  logout: () => post<object>('/api/logout', {}),
   points: (rootId: string, signal?: AbortSignal) =>
     get<{ points: Point[] }>(`${root(rootId)}/points`, signal).then((r) => r.points),
   folder: (rootId: string, path: string, at: string, signal?: AbortSignal) =>

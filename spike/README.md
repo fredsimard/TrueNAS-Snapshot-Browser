@@ -1,63 +1,31 @@
-# Phase 0 spike: snapshot automount inside a container
+# Spikes
 
-Gate for the whole architecture (PLAN.md §12 risk 1 and 2). Answers:
+Throwaway checks that prove a risky assumption on a real TrueNAS server before anything is built on it.
+Run them from a root shell on the NAS, with the scripts copied somewhere the container can mount.
 
-1. Is `.zfs/snapshot/<snap>/…` listable and readable from inside a container, including snapshots that
-   were **not** automounted when the container started?
-2. Does TrueNAS's custom app YAML accept `bind.propagation: rslave`, and is it needed?
-3. Can the container drop to a user's uid/gids so the kernel enforces ACLs?
-4. What does `stat` on `.zfs/snapshot/<snap>` return compared to the snapshot's creation time, and in which
-   timezone are the timestamps in snapshot names?
+## `check.py`: snapshot automount in a container (Phase 0, PLAN.md §12 risks 1–2)
 
-## Steps
+```bash
+docker run --rm --mount type=bind,source=/path/to/check.py,target=/check.py,readonly --mount type=bind,source=/mnt/POOL/DATASET,target=/mnt/POOL/DATASET,readonly,bind-propagation=rslave python:3.12-slim python3 /check.py /mnt/POOL/DATASET
+```
 
-1. Pick a dataset mountpoint with snapshots, e.g. `/mnt/tank/studio`. Edit `compose.yaml`: replace
-   `/mnt/POOL/DATASET` (four places) and `TZ`.
-2. Install it as a custom app via "Install via YAML". Note whether TrueNAS accepts the `propagation` key.
-3. Copy the check script to the NAS:
+Add `--as-uid`, `--as-gid`, `--as-groups` and `--rel` to the script to also test privilege dropping (Phase 4).
 
-   ```bash
-   scp spike/check.py root@NAS:/tmp/check.py
-   ```
+**Result on TrueNAS, kernel 6.12:**
 
-4. On the NAS shell, find the two containers, then make sure the snapshots the script will test are
-   **not** mounted on the host. Unmounting a snapshot automount is harmless; ZFS remounts it on next access.
+- With `rslave`, snapshots that weren't mounted at container start automount and read correctly.
+- Without it, they list as empty with no error, so the app would show wrong folders. `rslave` is required.
+- "Install via YAML" accepts `bind.propagation: rslave`. The Custom App wizard has no such setting.
+- Timestamps in TrueNAS snapshot names are local time and follow daylight saving, so `TZ` must be a zone name.
+- `lstat` on `.zfs/snapshot/<snap>` gives the creation time only while unmounted, so it can't replace name parsing.
 
-   ```bash
-   docker ps --format '{{.Names}}' | grep -E 'rslave|private'
-   grep '/.zfs/snapshot/' /proc/mounts | awk '{print $2}'
-   umount /mnt/POOL/DATASET/.zfs/snapshot/<snap>     # for any snapshot listed above
-   ```
+## `smb_auth.py`: sign-in over SMB from a container (Phase 3, risk 3)
 
-5. Run the check in both containers:
+```bash
+docker run --rm -it --mount type=bind,source=/path/to/smb_auth.py,target=/smb_auth.py,readonly python:3.12-slim sh -c "pip install -q --root-user-action=ignore smbprotocol && python3 /smb_auth.py NAS_ADDRESS"
+```
 
-   ```bash
-   docker exec -i <rslave-container>  python3 - /mnt/POOL/DATASET < /tmp/check.py
-   docker exec -i <private-container> python3 - /mnt/POOL/DATASET < /tmp/check.py
-   ```
+It tries a real login, a wrong password and an unknown user. Use the NAS's network address: `127.0.0.1` is the
+container itself.
 
-6. Optional: privilege drop. Use a real user's uid, primary gid and groups (`id <user>` on the NAS), and a
-   folder that user can or can't read:
-
-   ```bash
-   docker exec -i <rslave-container> python3 - /mnt/POOL/DATASET \
-       --as-uid 3000 --as-gid 3000 --as-groups 3000,545 --rel "Projects/Some Folder" < /tmp/check.py
-   ```
-
-7. Record the host's view for comparison:
-
-   ```bash
-   zfs list -H -p -t snapshot -o name,creation -d 1 POOL/DATASET | tail -n 5
-   ls /mnt/POOL/DATASET/.zfs/snapshot/<snap> | wc -l
-   ```
-
-8. Remove the app.
-
-## Reading the result
-
-- `PASS` in `rslave` and `FAIL` (empty listings) in `private`: propagation is required and works. The app's
-  compose file uses `rslave`.
-- `PASS` in both: propagation isn't needed on this kernel; keep `rslave` anyway.
-- `FAIL` in both: the architecture changes (filesystem access moves to the host). Stop.
-- Name time vs `lstat mtime before`: if the mtime matches `zfs list … creation`, it can replace name parsing.
-  If the name's time is offset from creation by the UTC offset, names are written in UTC.
+**Result:** the real login opens a signed SMB 3.1.1 session; the other two are refused.

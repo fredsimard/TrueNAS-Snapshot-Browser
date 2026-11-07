@@ -120,6 +120,7 @@ def check_snapshot(snapdir: str, name: str) -> bool:
 
 
 def drop_and_list(uid: int, gid: int, groups: list[int], paths: list[str]) -> None:
+    sys.stdout.flush()  # or the child repeats everything still in the buffer
     pid = os.fork()
     if pid == 0:
         try:

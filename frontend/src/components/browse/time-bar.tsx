@@ -34,7 +34,7 @@ export function TimeBar({
   const atNow = selected === nowIndex
 
   return (
-    <section aria-label="Point in time" className="flex shrink-0 flex-col gap-1.5 border-b bg-subtle px-6 pt-2.5 pb-1.5">
+    <section aria-label="Point in time" className="flex shrink-0 flex-col gap-1.5 border-b bg-subtle px-6 pt-2.5 pb-2.5">
       <div className="flex h-[34px] items-center gap-5">
         <div className="flex min-w-0 items-baseline gap-2 whitespace-nowrap">
           <span className="text-muted-foreground">As of</span>

@@ -3,8 +3,8 @@
 @import "@fontsource-variable/geist";
 @import "@fontsource-variable/geist-mono";
 
-/* Light and dark follow the system setting only. */
-@custom-variant dark (@media (prefers-color-scheme: dark));
+/* lib/theme.ts sets .dark on <html> from the user's choice or the system setting. */
+@custom-variant dark (&:is(.dark *));
 
 :root {
   --radius: 0.625rem;
@@ -34,36 +34,36 @@
   --status-changed: #15803d;
   --status-changed-bg: #f0fdf4;
   --timeline-selected: #2563eb;
+  --timeline-track: #e7e7ea;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: oklch(0.141 0.005 285.823);
-    --foreground: oklch(0.985 0 0);
-    --card: oklch(0.21 0.006 285.885);
-    --card-foreground: oklch(0.985 0 0);
-    --popover: oklch(0.21 0.006 285.885);
-    --popover-foreground: oklch(0.985 0 0);
-    --primary: oklch(0.92 0.004 286.32);
-    --primary-foreground: oklch(0.21 0.006 285.885);
-    --secondary: oklch(0.274 0.006 286.033);
-    --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(0.274 0.006 286.033);
-    --muted-foreground: oklch(0.705 0.015 286.067);
-    --accent: oklch(0.274 0.006 286.033);
-    --accent-foreground: oklch(0.985 0 0);
-    --destructive: oklch(0.704 0.191 22.216);
-    --border: oklch(1 0 0 / 10%);
-    --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.552 0.016 285.938);
+.dark {
+  --background: oklch(0.141 0.005 285.823);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.21 0.006 285.885);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.21 0.006 285.885);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.92 0.004 286.32);
+  --primary-foreground: oklch(0.21 0.006 285.885);
+  --secondary: oklch(0.274 0.006 286.033);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.274 0.006 286.033);
+  --muted-foreground: oklch(0.705 0.015 286.067);
+  --accent: oklch(0.274 0.006 286.033);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.552 0.016 285.938);
 
-    --subtle: #0e0e10;
-    --status-deleted: #f87171;
-    --status-deleted-bg: #1f0a0a;
-    --status-changed: #4ade80;
-    --status-changed-bg: #052e16;
-    --timeline-selected: #3b82f6;
-  }
+  --subtle: #0e0e10;
+  --status-deleted: #f87171;
+  --status-deleted-bg: #1f0a0a;
+  --status-changed: #4ade80;
+  --status-changed-bg: #052e16;
+  --timeline-selected: #3b82f6;
+  --timeline-track: #29292d;
 }
 
 @theme inline {
@@ -97,6 +97,7 @@
   --color-status-changed: var(--status-changed);
   --color-status-changed-bg: var(--status-changed-bg);
   --color-timeline-selected: var(--timeline-selected);
+  --color-timeline-track: var(--timeline-track);
 }
 
 @layer base {
@@ -104,7 +105,10 @@
     @apply border-border outline-ring/50;
   }
   html {
-    color-scheme: light dark;
+    color-scheme: light;
+  }
+  html.dark {
+    color-scheme: dark;
   }
   body {
     @apply bg-background text-foreground font-sans antialiased;

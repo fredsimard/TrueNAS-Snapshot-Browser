@@ -23,6 +23,7 @@ export function Timeline({
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(0)
+  const [hovered, setHovered] = useState<number | null>(null)
 
   useLayoutEffect(() => {
     const el = ref.current
@@ -45,12 +46,12 @@ export function Timeline({
   const selX = atNow ? right : xs[selected]
 
   return (
-    <div ref={ref} className="relative h-[50px] select-none">
+    <div ref={ref} className="relative h-[52px] rounded-md bg-timeline-track select-none">
       {width > 0 && (
         <>
           {marks.map((m) => (
             <div key={m.text}>
-              <span className="absolute top-0.5 h-7 w-px bg-border" style={{ left: m.x }} />
+              <span className="absolute top-0.5 h-7 w-px bg-foreground/15" style={{ left: m.x }} />
               <span
                 className="absolute top-[34px] text-[11.5px] whitespace-nowrap text-muted-foreground"
                 style={{ left: m.x + 4 }}
@@ -59,7 +60,7 @@ export function Timeline({
               </span>
             </div>
           ))}
-          <span className="absolute inset-x-0 top-[29px] h-px bg-foreground/15" />
+          <span className="absolute inset-x-0 top-[29px] h-px bg-foreground/20" />
           {!atNow && (
             <span
               className="absolute top-1.5 h-6 rounded-[3px] bg-timeline-selected/7 dark:bg-timeline-selected/14"
@@ -72,8 +73,9 @@ export function Timeline({
               type="button"
               tabIndex={-1}
               aria-label={p.label}
-              title={p.label}
               onClick={() => onSelect(i)}
+              onPointerEnter={() => setHovered(i)}
+              onPointerLeave={() => setHovered(null)}
               className="group absolute top-1 flex h-[26px] w-[7px] cursor-pointer items-end justify-center p-0"
               style={{ left: xs[i] - 3.5 }}
             >
@@ -92,7 +94,7 @@ export function Timeline({
                 style={{ left: selX - 1 }}
               />
               <span
-                className="pointer-events-none absolute top-px size-2.5 rounded-full bg-timeline-selected ring-2 ring-subtle"
+                className="pointer-events-none absolute top-px size-2.5 rounded-full bg-timeline-selected ring-2 ring-timeline-track"
                 style={{ left: selX - 5 }}
               />
             </>
@@ -103,7 +105,7 @@ export function Timeline({
             aria-label="Now"
             onClick={() => onSelect(nowIndex)}
             className={cn(
-              'absolute top-[23px] size-3 cursor-pointer rounded-full border-2 border-subtle p-0',
+              'absolute top-[23px] size-3 cursor-pointer rounded-full border-2 border-timeline-track p-0',
               atNow ? 'bg-timeline-selected ring-1 ring-timeline-selected' : 'bg-foreground ring-1 ring-foreground',
             )}
             style={{ left: right - 6 }}
@@ -111,8 +113,43 @@ export function Timeline({
           <span className="absolute top-[34px] text-[11.5px] font-semibold" style={{ left: right - 12 }}>
             Now
           </span>
+          {hovered !== null && hovered < nowIndex && (
+            <TickLabel x={xs[hovered]} tickTop={points[hovered].midnight ? 18 : 22} maxWidth={width}>
+              {points[hovered].label}
+            </TickLabel>
+          )}
         </>
       )}
     </div>
+  )
+}
+
+/** One shared label, shown at once above the hovered tick and kept inside the timeline's width. */
+function TickLabel({
+  x,
+  tickTop,
+  maxWidth,
+  children,
+}: {
+  x: number
+  tickTop: number
+  maxWidth: number
+  children: string
+}) {
+  const ref = useRef<HTMLSpanElement>(null)
+  const [labelWidth, setLabelWidth] = useState(0)
+
+  useLayoutEffect(() => {
+    setLabelWidth(ref.current?.offsetWidth ?? 0)
+  }, [children])
+
+  return (
+    <span
+      ref={ref}
+      className="pointer-events-none absolute z-50 -translate-y-full rounded-md bg-foreground px-2 py-1 text-xs whitespace-nowrap text-background"
+      style={{ left: Math.min(Math.max(x - labelWidth / 2, 0), maxWidth - labelWidth), top: tickTop - 4 }}
+    >
+      {children}
+    </span>
   )
 }

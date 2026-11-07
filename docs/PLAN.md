@@ -87,9 +87,6 @@ roots:
   - id: video-archive
     label: "Video Archive"
     share_root: /mnt/tank/studio/VIDEO_ARCHIVE
-auth:
-  method: smb            # smb | ldap
-  smb_host: 127.0.0.1
 limits:
   max_download_bytes: 21474836480
   max_snapshots_listed: 500
@@ -103,7 +100,7 @@ Multiple roots per instance; one instance per server. Roots sharing a dataset re
 
 Users must prove identity against the same accounts they already use for SMB — local TrueNAS users on some servers, Active Directory on others.
 
-**Chosen approach: SMB self-authentication.** The app opens an SMB session to `127.0.0.1` using the submitted credentials and treats a successful session setup as authentication. Samba on each server is already configured for whichever backend that server uses, so the same code path covers local and AD accounts with no per-server auth configuration and no credential storage in the app.
+**Chosen approach: SMB self-authentication.** The app opens an SMB session to the NAS's own network address (`SMB_HOST`; inside the container `127.0.0.1` is the container itself) using the submitted credentials and treats a successful, signed session setup as authentication. Samba on each server is already configured for whichever backend that server uses, so the same code path covers local and AD accounts with no per-server auth configuration and no credential storage in the app.
 
 Rejected alternatives:
 
@@ -151,9 +148,9 @@ Single container, custom app in TrueNAS Apps. Host path mounts, read-only, one p
 
 Ordered by how much damage they do if they turn out badly.
 
-1. **Snapshot automount propagation into the container.** ZFS automounts each snapshot on first access to its directory. Docker bind mounts default to `private` propagation, so mounts appearing on the host *after* container start may not be visible inside it — the container could see snapshot directories that are empty. Mitigations, in order of preference: set `rshared`/`rslave` propagation on the bind mount; or run the filesystem-access component on the host and keep only the web layer containerised. **This is a gate. Prototype it before writing anything else.**
-2. **TrueNAS Apps custom-app capabilities.** Whether the custom app YAML permits mount propagation settings, host path mounts at pool level, and the capabilities needed for privilege dropping. Unknown for 25.10; determine empirically in Phase 0.
-3. **Loopback SMB authentication.** Whether TrueNAS's Samba configuration accepts sessions from `127.0.0.1`. Unverified. If refused, fall back to LDAP/AD bind plus a separate mechanism for local users.
+1. **Snapshot automount propagation into the container.** ZFS automounts each snapshot on first access to its directory. Docker bind mounts default to `private` propagation, so mounts appearing on the host *after* container start may not be visible inside it — the container could see snapshot directories that are empty. Mitigations, in order of preference: set `rshared`/`rslave` propagation on the bind mount; or run the filesystem-access component on the host and keep only the web layer containerised. **Resolved: `rslave` works and is required; without it snapshots list as empty with no error.**
+2. **TrueNAS Apps custom-app capabilities.** Whether the custom app YAML permits mount propagation settings, host path mounts at pool level, and the capabilities needed for privilege dropping. Resolved for propagation: "Install via YAML" accepts it, the Custom App wizard has no such setting. Capabilities for privilege dropping are still to be confirmed in Phase 4.
+3. **SMB authentication from the container.** Resolved: a session to the NAS's network address accepts real logins and refuses wrong passwords and unknown users, without falling back to guest.
 4. **AD uid consistency.** The container must resolve AD users to the same uids winbind assigns on the host, or ACL enforcement silently checks against the wrong identity. Options: join the container to the domain with identical idmap config, or query the host for the mapping. Affects only the AD servers.
 5. **Scale of enumeration.** Hundreds of snapshots against deep trees. Enumerate lazily, one directory at a time, never walk a whole snapshot. Cache snapshot *lists* briefly; never cache directory contents across users.
 6. **Portability across 8 servers.** Keep the container free of any dependency on TrueNAS internals so that a version difference between servers doesn't fragment the deployment.
@@ -163,7 +160,7 @@ Ordered by how much damage they do if they turn out badly.
 - **Phase 0 — Spike (gate).** A throwaway container with a host path mount; prove that `.zfs/snapshot/<snap>/…` is listable and readable from *inside* the container, including snapshots not yet automounted at container start. If this fails and can't be made to work, the architecture changes fundamentally and the rest of this plan is void.
 - **Phase 1 — Read-only browser.** One hardcoded root, no authentication, bound to localhost. Proves the path model and the two-axis navigation.
 - **Phase 2 — Config and multi-root.** Auto-detection of dataset mountpoint, YAML config, path containment tests.
-- **Phase 3 — Authentication.** SMB loopback, sessions.
+- **Phase 3 — Authentication.** SMB sign-in, sessions.
 - **Phase 4 — Authorization.** Privilege-dropping workers; verify against a test user with deliberately restrictive ACLs that denied paths are invisible, not merely unlinked.
 - **Phase 5 — Downloads.** File streaming, folder archives, limits, audit log.
 - **Phase 6 — Active Directory.** Identity resolution on an AD-joined server.

@@ -1,19 +1,32 @@
 """HTTP API and static frontend.
 
 Clients address content as root id + relative path + opaque point id. No absolute path,
-snapshot name or OS error text is ever sent to the client.
+snapshot name or OS error text is ever sent to the client. Everything except sign-in and the
+server's name requires a session.
 """
 
 from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Callable
+from functools import partial
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from .auth import (
+    MAX_FAILURES_PER_ADDRESS,
+    MAX_FAILURES_PER_USER,
+    AuthUnavailable,
+    LoginThrottle,
+    SessionStore,
+    smb_verify,
+)
 from .browse import FolderResult, History, Row, Timeline, file_history, list_folder
 from .config import Config
 from .paths import Entry, PathRejected, Root, parse_rel, resolve_root
@@ -21,8 +34,23 @@ from .snapshots import SnapshotIndex
 
 log = logging.getLogger(__name__)
 
+SESSION_COOKIE = "snapback_session"
 
-def create_app(config: Config, static_dir: str | None = None) -> FastAPI:
+
+class LoginRequest(BaseModel):
+    username: str = Field(max_length=256)
+    password: str = Field(max_length=1024)
+
+
+def create_app(
+    config: Config,
+    static_dir: str | None = None,
+    verify: Callable[[str, str], bool] | None = None,
+) -> FastAPI:
+    verify = verify or partial(smb_verify, config.smb_host)
+    sessions = SessionStore()
+    user_throttle = LoginThrottle(MAX_FAILURES_PER_USER)
+    address_throttle = LoginThrottle(MAX_FAILURES_PER_ADDRESS)
     roots: dict[str, Root] = {rc.id: resolve_root(rc) for rc in config.roots}
     index = SnapshotIndex(
         prefixes=config.snapshot_prefixes,
@@ -43,6 +71,11 @@ def create_app(config: Config, static_dir: str | None = None) -> FastAPI:
     async def http_error(_: Request, exc: StarletteHTTPException) -> JSONResponse:
         return JSONResponse({"error": exc.detail}, status_code=exc.status_code)
 
+    @app.exception_handler(RequestValidationError)
+    async def invalid_request(_: Request, __: RequestValidationError) -> JSONResponse:
+        # The default handler echoes the submitted values, which can include a password.
+        return JSONResponse({"error": "bad_request"}, status_code=400)
+
     @app.exception_handler(Exception)
     async def unexpected_error(request: Request, exc: Exception) -> JSONResponse:
         log.exception("unhandled error on %s", request.url.path)
@@ -57,6 +90,12 @@ def create_app(config: Config, static_dir: str | None = None) -> FastAPI:
         if request.url.path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-store"
         return response
+
+    def signed_in(request: Request) -> str:
+        user = sessions.get(request.cookies.get(SESSION_COOKIE))
+        if user is None:
+            raise HTTPException(401, "not_signed_in")
+        return user
 
     def get_root(root_id: str) -> Root:
         root = roots.get(root_id)
@@ -80,25 +119,58 @@ def create_app(config: Config, static_dir: str | None = None) -> FastAPI:
         return i
 
     @app.get("/api/info")
-    def info() -> dict:
+    def info(request: Request) -> dict:
+        user = sessions.get(request.cookies.get(SESSION_COOKIE))
         return {
             "server_label": config.server_label,
-            "roots": [{"id": r.id, "label": r.label} for r in roots.values()],
+            "user": user,
+            "roots": [{"id": r.id, "label": r.label} for r in roots.values()] if user else [],
         }
 
-    @app.get("/api/roots/{root_id}/points")
+    @app.post("/api/login")
+    def login(body: LoginRequest, request: Request, response: Response) -> dict:
+        username = body.username.strip()
+        address = request.client.host if request.client else "unknown"
+        user_key = username.lower()
+        if not username or not body.password:
+            raise HTTPException(401, "bad_credentials")
+        if user_throttle.blocked(user_key) or address_throttle.blocked(address):
+            log.warning("sign-in blocked for %r from %s: too many failures", username, address)
+            raise HTTPException(429, "too_many_attempts")
+        try:
+            ok = verify(username, body.password)
+        except AuthUnavailable as e:
+            log.error("sign-in unavailable, SMB server unreachable: %s", e)
+            raise HTTPException(503, "auth_unavailable") from None
+        if not ok:
+            user_throttle.failed(user_key)
+            address_throttle.failed(address)
+            log.warning("sign-in failed for %r from %s", username, address)
+            raise HTTPException(401, "bad_credentials")
+        user_throttle.clear(user_key)
+        log.info("signed in: %r from %s", username, address)
+        response.set_cookie(SESSION_COOKIE, sessions.create(username), httponly=True, samesite="strict", path="/")
+        return {"user": username}
+
+    @app.post("/api/logout")
+    def logout(request: Request, response: Response) -> dict:
+        sessions.delete(request.cookies.get(SESSION_COOKIE))
+        response.delete_cookie(SESSION_COOKIE, httponly=True, samesite="strict", path="/")
+        return {}
+
+    @app.get("/api/roots/{root_id}/points", dependencies=[Depends(signed_in)])
     def points(root_id: str) -> dict:
         tl = timeline(get_root(root_id))
         return {"points": [{"id": s.id, "time": s.time.isoformat()} for s in tl.snapshots]}
 
-    @app.get("/api/roots/{root_id}/folder")
+    @app.get("/api/roots/{root_id}/folder", dependencies=[Depends(signed_in)])
     def folder(root_id: str, path: str = "", at: str = "now") -> dict:
         root = get_root(root_id)
         parts = get_parts(path)
         tl = timeline(root)
         return folder_json(tl, list_folder(tl, parts, point_index(tl, at)))
 
-    @app.get("/api/roots/{root_id}/history")
+    @app.get("/api/roots/{root_id}/history", dependencies=[Depends(signed_in)])
     def history(root_id: str, path: str) -> dict:
         root = get_root(root_id)
         parts = get_parts(path)

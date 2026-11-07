@@ -4,13 +4,19 @@
     {
       "name": "backend",
       "runtimeExecutable": "bash",
-      "runtimeArgs": ["-c", "cd backend && SNAPSHOT_PREFIXES=auto- SNAPBACK_CONFIG=../dev/demo/snapback.yaml exec .venv/bin/python -m snapback"],
+      "runtimeArgs": [
+        "-c",
+        "cd backend && SNAPSHOT_PREFIXES=auto- SNAPBACK_CONFIG=../dev/demo/snapback.yaml exec .venv/bin/python scripts/dev_server.py"
+      ],
       "port": 8080
     },
     {
       "name": "frontend",
       "runtimeExecutable": "bash",
-      "runtimeArgs": ["-c", "cd frontend && exec npm run dev -- --port 5173 --strictPort"],
+      "runtimeArgs": [
+        "-c",
+        "cd frontend && exec npm run dev -- --port 5173 --strictPort"
+      ],
       "port": 5173
     }
   ]

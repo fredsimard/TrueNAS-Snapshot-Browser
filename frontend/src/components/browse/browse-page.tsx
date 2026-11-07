@@ -132,7 +132,7 @@ export function BrowsePage({
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.defaultPrevented || e.altKey || e.metaKey || e.ctrlKey) return
     const t = e.target as HTMLElement
-    if (t.closest('input, textarea, [data-slot=popover-content], [data-slot=context-menu-content]')) return
+    if (t.closest('input, textarea, [data-slot=popover-content], [data-slot=context-menu-content], [data-slot=dropdown-menu-content]')) return
     if (e.key === 'ArrowLeft') {
       e.preventDefault()
       step(-1)
@@ -238,13 +238,6 @@ export function BrowsePage({
     }
   }
 
-  let footer = ''
-  if (folder?.state === 'ok' && fresh && cur && all.length > 0) {
-    footer = `${shown.length} ${shown.length === 1 ? 'item' : 'items'}${effFilter !== 'all' ? ` of ${all.length}` : ''}${atNow ? '' : ` · as of ${label}`}`
-  } else if (!fresh && cur && !folderReq.error) {
-    footer = `Loading this folder as of ${label}…`
-  }
-
   return (
     <div
       ref={rootRef}
@@ -254,7 +247,17 @@ export function BrowsePage({
       onMouseUp={() => document.activeElement === document.body && rootRef.current?.focus({ preventScroll: true })}
       className="flex h-dvh flex-col outline-none"
     >
-      <AppHeader serverLabel={info.server_label}>
+      <AppHeader
+        serverLabel={info.server_label}
+        user={info.user}
+        actions={
+          info.roots.length > 1 && (
+            <a href="/" onClick={onLink} className="shrink-0 text-muted-foreground hover:text-foreground">
+              All shares
+            </a>
+          )
+        }
+      >
         <Breadcrumb className="min-w-0">
           <BreadcrumbList className="flex-nowrap gap-1.5 text-[13px] sm:gap-1.5">
             {[root.label, ...parts].map((text, i, arr) => (
@@ -275,11 +278,6 @@ export function BrowsePage({
             ))}
           </BreadcrumbList>
         </Breadcrumb>
-        {info.roots.length > 1 && (
-          <a href="/" onClick={onLink} className="ml-auto shrink-0 text-muted-foreground hover:text-foreground">
-            All shares
-          </a>
-        )}
       </AppHeader>
 
       {points && cur ? (
@@ -304,15 +302,12 @@ export function BrowsePage({
           counts={folder?.state === 'ok' && fresh && all.length > 0 ? counts : null}
         />
       ) : (
-        <div className="h-[106px] shrink-0 border-b bg-subtle" />
+        <div className="h-[113px] shrink-0 border-b bg-subtle" />
       )}
 
       <div className="flex min-h-0 grow">
         <div className="relative flex min-w-0 grow flex-col">
           {body}
-          <footer className="flex h-9 shrink-0 items-center gap-3 border-t px-4 text-xs text-muted-foreground">
-            <span>{footer}</span>
-          </footer>
         </div>
         {openName && points && cur && (
           <HistoryPanel
